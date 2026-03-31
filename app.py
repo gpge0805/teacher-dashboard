@@ -17,8 +17,8 @@ def check_password(hashed_password: str, user_password: str) -> bool:
 
 # 登入畫面
 def login_page():
-    st.title("🎓 工業電子丙級學科測試線上版 - 教師管理後台")
-    st.write("請輸入您的教師帳號與密碼登入系統。")
+    st.markdown("<h1 style='text-align: center;'>🎓 工業電子丙級學科測試線上版 - 教師管理後台</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center;'>請輸入您的教師帳號與密碼登入系統。</p>", unsafe_allow_html=True)
     
     # 使用 columns 讓登入框置中
     col1, col2, col3 = st.columns([1, 2, 1])
