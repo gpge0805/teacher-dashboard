@@ -8,12 +8,11 @@ st.set_page_config(page_title="教師管理後台", page_icon="🎓", layout="wi
 
 # 檢查密碼的輔助函數
 def check_password(hashed_password: str, user_password: str) -> bool:
-    """比對密碼。如果是 bcrypt hash 則比對，否則直接比對明文 (方便初期測試)"""
+    """比對密碼（僅支援 bcrypt hash）"""
     try:
         return bcrypt.checkpw(user_password.encode('utf-8'), hashed_password.encode('utf-8'))
-    except ValueError:
-        # 如果資料庫裡存的是明文 (測試期)，就直接比對字串
-        return hashed_password == user_password
+    except (ValueError, TypeError):
+        return False
 
 # 登入畫面
 def login_page():
