@@ -1,0 +1,123 @@
+import pandas as pd
+import streamlit as st
+
+from utils.supabase_client import supabase
+from utils.weekly_stats import (
+    build_other_scores_display,
+    compute_student_weekly_stats,
+    current_local_time,
+    get_week_bounds,
+    load_weekly_pass_score,
+    safe_str,
+)
+
+
+def _load_student(student_id):
+    response = (
+        supabase.table("students")
+        .select("student_id,name,class_name,seat_number")
+        .eq("student_id", student_id)
+        .limit(1)
+        .execute()
+    )
+    data = response.data or []
+    return data[0] if data else None
+
+
+def _load_week_results(student_id, week_start_dt, week_end_dt):
+    utc_start = week_start_dt.tz_convert('UTC').isoformat()
+    utc_end = week_end_dt.tz_convert('UTC').isoformat()
+    response = (
+        supabase.table("exam_results")
+        .select("*")
+        .eq("student_id", student_id)
+        .gte("created_at", utc_start)
+        .lt("created_at", utc_end)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    return pd.DataFrame(response.data or [])
+
+
+def _load_override(student_id, week_start_dt):
+    try:
+        response = (
+            supabase.table("weekly_primary_overrides")
+            .select("*")
+            .eq("student_id", student_id)
+            .eq("week_start_date", week_start_dt.date().isoformat())
+            .limit(1)
+            .execute()
+        )
+        return response.data or []
+    except Exception:
+        return []
+
+
+def show():
+    st.title("📘 本週成績查詢")
+    st.write("輸入學號後，可即時查看本週統計成績。")
+
+    week_start_dt, week_end_dt = get_week_bounds()
+    week_label = f"{week_start_dt.strftime('%Y-%m-%d %H:%M')} ~ {(week_end_dt - pd.Timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M')}"
+    st.info(f"目前統計區間：{week_label}（台灣時間）")
+
+    query_params = st.query_params
+    default_student_id = safe_str(query_params.get('student_id', ''))
+    student_id = st.text_input("請輸入學號", value=default_student_id)
+
+    if st.button("查詢本週成績", type="primary"):
+        if not safe_str(student_id):
+            st.error("請輸入學號。")
+            return
+
+        student = _load_student(safe_str(student_id))
+        if not student:
+            st.error("查無此學號，請確認是否輸入正確。")
+            return
+
+        results_df = _load_week_results(safe_str(student_id), week_start_dt, week_end_dt)
+        override_rows = _load_override(safe_str(student_id), week_start_dt)
+        pass_score = load_weekly_pass_score(supabase)
+        summary = compute_student_weekly_stats(
+            student_row=student,
+            results_df=results_df,
+            week_start_dt=week_start_dt,
+            week_end_dt=week_end_dt,
+            pass_score=pass_score,
+            override_rows=override_rows,
+        )
+
+        st.success(f"已更新：{current_local_time().strftime('%Y-%m-%d %H:%M:%S')}")
+        top_col1, top_col2, top_col3 = st.columns(3)
+        top_col1.metric("學號", summary['student_id'])
+        top_col2.metric("姓名", summary['student_name'])
+        top_col3.metric("班級", summary['class_name'] or '未設定')
+
+        score_col1, score_col2, score_col3 = st.columns(3)
+        score_col1.metric("本週總成績", summary['total_score'])
+        score_col2.metric("及格線", summary['pass_score'])
+        score_col3.metric("結果", summary['status_text'])
+
+        st.markdown("### 成績組成")
+        detail_df = pd.DataFrame([
+            {
+                '項目': '週三關鍵成績（50%）',
+                '分數': summary['primary_score'],
+                '採計來源': summary['primary_source'],
+                '加權後': summary['primary_component'],
+            },
+            {
+                '項目': '其他時段前 4 高分平均（50%）',
+                '分數': summary['other_average'],
+                '採計來源': build_other_scores_display(summary['other_scores']),
+                '加權後': summary['other_component'],
+            }
+        ])
+        st.dataframe(detail_df, use_container_width=True, hide_index=True)
+
+        if summary['other_missing_count'] > 0:
+            st.warning(f"其餘時段不足 4 筆，已自動以 0 分補足 {summary['other_missing_count']} 筆。")
+
+        if not summary['primary_record_id']:
+            st.warning("本週尚未有關鍵時段成績，該部分目前以 0 分計算。")

@@ -66,6 +66,14 @@ def login_page():
 
 # 主程式邏輯
 def main():
+    query_params = st.query_params
+    public_view = str(query_params.get('view', ''))
+
+    if public_view == 'student-weekly':
+        from views import student_weekly_query
+        student_weekly_query.show()
+        return
+
     # 初始化 Session State
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
@@ -82,7 +90,7 @@ def main():
         st.sidebar.divider()
         
         # 🌟 建立左側功能導覽選單
-        menu = ["📊 儀表板首頁", "📝 成績報表查詢", "👥 學生名冊管理", "📈 錯題弱點分析"]
+        menu = ["📊 儀表板首頁", "📝 成績報表查詢", "📅 每週成績統計", "👥 學生名冊管理", "📈 錯題弱點分析"]
         if st.session_state.get('role') == 'admin':
             menu.append("👨‍🏫 教師帳號管理")
             
@@ -109,6 +117,10 @@ def main():
             # 載入我們剛剛寫好的 score_report 模組
             from views import score_report
             score_report.show()
+
+        elif choice == "📅 每週成績統計":
+            from views import weekly_stats
+            weekly_stats.show()
             
         elif choice == "👥 學生名冊管理":
             # 載入我們剛剛寫好的 student_management 模組
