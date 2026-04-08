@@ -10,6 +10,45 @@ PRIMARY_SLOT_START_HOUR = 15
 PRIMARY_SLOT_END_HOUR = 16
 DEFAULT_WEEKLY_PASS_SCORE = 60
 
+# 週統計只計算「全選(所有項目)」且 80 題的正式考試
+FULL_EXAM_QUESTION_COUNT = 80
+FULL_EXAM_CATEGORIES_LABEL = "全選 (所有項目)"
+
+
+def _is_full_exam_categories(val):
+    """判斷 categories 欄位是否包含「全選(所有項目)」標記。"""
+    if isinstance(val, (list, tuple)):
+        return any(FULL_EXAM_CATEGORIES_LABEL in str(item) for item in val)
+    if val is None:
+        return False
+    try:
+        import json
+        parsed = json.loads(val) if isinstance(val, str) else None
+        if isinstance(parsed, list):
+            return any(FULL_EXAM_CATEGORIES_LABEL in str(item) for item in parsed)
+    except (ValueError, TypeError):
+        pass
+    return FULL_EXAM_CATEGORIES_LABEL in str(val)
+
+
+def _filter_full_exam_only(df):
+    """只保留 total_questions==80 且 categories 含「全選(所有項目)」的成績。"""
+    if df.empty:
+        return df
+
+    if 'total_questions' in df.columns:
+        total_q = pd.to_numeric(df['total_questions'], errors='coerce').fillna(0)
+        mask_q = (total_q == FULL_EXAM_QUESTION_COUNT)
+    else:
+        mask_q = pd.Series(False, index=df.index)
+
+    if 'categories' in df.columns:
+        mask_cat = df['categories'].apply(_is_full_exam_categories)
+    else:
+        mask_cat = pd.Series(False, index=df.index)
+
+    return df[mask_q & mask_cat].copy()
+
 
 def safe_str(value):
     if value is None or pd.isna(value):
@@ -69,6 +108,9 @@ def prepare_results_dataframe(results_df):
     df['created_hour_local'] = df['created_at_local'].dt.hour
     df['score_num'] = pd.to_numeric(df.get('score'), errors='coerce').fillna(0.0)
     df['correct_count_num'] = pd.to_numeric(df.get('correct_count'), errors='coerce').fillna(0.0)
+
+    # 只計算「全選(所有項目)」80題正式考試
+    df = _filter_full_exam_only(df)
     return df
 
 
