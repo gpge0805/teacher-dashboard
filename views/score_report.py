@@ -154,6 +154,53 @@ def _find_invalid_exam_rows(result_df, students_df):
 
     return pd.DataFrame(invalid_rows)
 
+
+def _find_duplicate_exam_rows(result_df):
+    """找出疑似重複上傳的成績資料（同學號、同秒、同成績等欄位）。"""
+    if result_df.empty or 'id' not in result_df.columns:
+        return pd.DataFrame()
+
+    work_df = result_df.copy()
+
+    if 'created_at_dt' in work_df.columns:
+        work_df['_created_at_second'] = pd.to_datetime(work_df['created_at_dt'], utc=True, errors='coerce').dt.floor('s')
+    else:
+        work_df['_created_at_second'] = pd.to_datetime(work_df.get('created_at'), utc=True, errors='coerce').dt.floor('s')
+
+    for col in ['student_id', 'score', 'correct_count', 'time_spent', 'total_questions', 'student_name', 'class_name', 'seat_number']:
+        if col not in work_df.columns:
+            work_df[col] = None
+
+    if 'categories' not in work_df.columns:
+        work_df['categories'] = None
+
+    work_df['_categories_key'] = work_df['categories'].apply(
+        lambda value: json.dumps(_parse_categories(value), ensure_ascii=False)
+    )
+
+    signature_cols = [
+        'student_id',
+        '_created_at_second',
+        'score',
+        'correct_count',
+        'time_spent',
+        'total_questions',
+        'student_name',
+        'class_name',
+        'seat_number',
+        '_categories_key',
+    ]
+
+    work_df = work_df.sort_values(by=['_created_at_second', 'id'], ascending=[True, True], na_position='last')
+    work_df['_dup_rank'] = work_df.groupby(signature_cols, dropna=False).cumcount()
+
+    dup_df = work_df[work_df['_dup_rank'] > 0].copy()
+    if dup_df.empty:
+        return pd.DataFrame()
+
+    dup_df['duplicate_reason'] = '疑似重複上傳（同學號、同秒、同成績）'
+    return dup_df
+
 def show():
     st.header("📝 成績報表查詢")
     st.write("您可以在此查看學生的測驗成績，並進行篩選與匯出。")
@@ -292,6 +339,92 @@ def show():
                                 st.rerun()
                     else:
                         st.info("尚未建立刪除預覽清單。請先點擊「產生刪除預覽清單」。")
+
+    # 2.6 找出重複上傳資料，並提供刪除功能
+    duplicate_df = _find_duplicate_exam_rows(df)
+    if not duplicate_df.empty:
+        with st.expander(f"🔁 重複成績清理（{len(duplicate_df)} 筆）", expanded=False):
+            st.warning("以下資料疑似為重複上傳造成，建議保留第一筆、刪除重複筆。")
+
+            duplicate_display_cols = {
+                'created_at': '測驗時間',
+                'class_name': '班級',
+                'seat_number': '座號',
+                'student_id': '學號',
+                'student_name': '姓名',
+                'score': '分數',
+                'correct_count': '答對題數',
+                'time_spent': '花費時間(秒)',
+                'duplicate_reason': '原因',
+            }
+
+            show_dup_cols = [c for c in duplicate_display_cols.keys() if c in duplicate_df.columns]
+            st.dataframe(
+                duplicate_df[show_dup_cols].rename(columns={k: v for k, v in duplicate_display_cols.items() if k in show_dup_cols}),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            target_duplicate_df = duplicate_df.copy()
+            if st.session_state.get('role') != 'admin':
+                my_students = set(
+                    visible_students_df['student_id'].dropna().astype(str).tolist()
+                )
+                target_duplicate_df = target_duplicate_df[
+                    target_duplicate_df['student_id'].astype(str).isin(my_students)
+                ]
+
+            if target_duplicate_df.empty:
+                st.info("目前沒有可由您刪除的重複資料。")
+            else:
+                preview_state_key = "duplicate_delete_preview_ids"
+                ids_to_delete_now = [x for x in target_duplicate_df['id'].tolist() if x is not None]
+                id_set_now = set(ids_to_delete_now)
+
+                st.caption("步驟 1：先產生預覽清單，再進行二次確認刪除。")
+                if st.button("📋 產生重複資料刪除預覽清單", use_container_width=True):
+                    st.session_state[preview_state_key] = ids_to_delete_now
+
+                preview_ids = st.session_state.get(preview_state_key, [])
+                preview_ids = [x for x in preview_ids if x in id_set_now]
+
+                if preview_ids:
+                    preview_df = target_duplicate_df[target_duplicate_df['id'].isin(preview_ids)].copy()
+                    st.markdown(f"##### 預覽將刪除重複資料（共 {len(preview_df)} 筆）")
+                    st.dataframe(
+                        preview_df[show_dup_cols].rename(columns={k: v for k, v in duplicate_display_cols.items() if k in show_dup_cols}),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                    st.caption("步驟 2：二次確認後才可刪除。")
+                    confirm_dup = st.checkbox("我確認要刪除以上重複資料")
+                    confirm_dup_text = st.text_input("請輸入 DELETE 進行重複資料二次確認", value="")
+                    dup_button_label = "🗑️ 刪除全部重複資料" if st.session_state.get('role') == 'admin' else "🗑️ 刪除我的學生重複資料"
+
+                    can_delete_dup = confirm_dup and (confirm_dup_text.strip().upper() == "DELETE")
+                    if st.button(dup_button_label, type="primary", disabled=not can_delete_dup):
+                        ids_to_delete = preview_ids
+                        deleted_count = 0
+                        error_message = None
+
+                        for i in range(0, len(ids_to_delete), 100):
+                            chunk = ids_to_delete[i:i + 100]
+                            try:
+                                supabase.table("exam_results").delete().in_("id", chunk).execute()
+                                deleted_count += len(chunk)
+                            except Exception as e:
+                                error_message = str(e)
+                                break
+
+                        if error_message:
+                            st.error(f"❌ 刪除失敗：{error_message}")
+                        else:
+                            st.session_state.pop(preview_state_key, None)
+                            st.success(f"✅ 已刪除 {deleted_count} 筆重複資料。")
+                            st.rerun()
+                else:
+                    st.info("尚未建立重複資料刪除預覽清單。請先點擊「產生重複資料刪除預覽清單」。")
     
     # 轉換時間格式 (將 UTC 轉為台灣時間)
     df['created_at_display'] = df['created_at_dt'].dt.tz_convert('Asia/Taipei').dt.strftime('%Y-%m-%d %H:%M:%S')
