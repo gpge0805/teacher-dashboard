@@ -11,6 +11,7 @@ from utils.weekly_stats import (
     current_local_time,
     get_week_bounds,
     load_weekly_pass_score,
+    prepare_results_dataframe,
     save_weekly_pass_score,
     safe_str,
 )
@@ -215,6 +216,11 @@ def show():
 
     student_ids = [safe_str(sid) for sid in visible_students_df['student_id'].tolist() if safe_str(sid)]
     results_df = _load_week_results(student_ids, week_start_dt, week_end_dt)
+    valid_results_df = prepare_results_dataframe(results_df)
+    if valid_results_df.empty:
+        st.info("當週沒有成績")
+        return
+
     override_rows = _load_week_overrides(student_ids, week_start_dt)
 
     summaries = build_weekly_summary(

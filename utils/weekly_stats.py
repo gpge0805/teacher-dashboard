@@ -13,6 +13,30 @@ DEFAULT_WEEKLY_PASS_SCORE = 60
 # 週統計只計算「全選(所有項目)」且 80 題的正式考試
 FULL_EXAM_QUESTION_COUNT = 80
 FULL_EXAM_CATEGORIES_LABEL = "全選 (所有項目)"
+REQUIRED_RESULT_COLUMNS = [
+    'id',
+    'student_id',
+    'created_at',
+    'created_at_dt',
+    'created_at_local',
+    'created_date_local',
+    'created_hour_local',
+    'score',
+    'score_num',
+    'correct_count',
+    'correct_count_num',
+    'total_questions',
+    'categories',
+]
+
+
+def _ensure_result_columns(df):
+    if df is None:
+        df = pd.DataFrame()
+    for col in REQUIRED_RESULT_COLUMNS:
+        if col not in df.columns:
+            df[col] = pd.NA
+    return df
 
 
 def _is_full_exam_categories(val):
@@ -92,16 +116,16 @@ def format_week_label(week_start_dt, week_end_dt):
 
 def prepare_results_dataframe(results_df):
     if results_df is None or results_df.empty:
-        return pd.DataFrame()
+        return _ensure_result_columns(pd.DataFrame())
 
-    df = results_df.copy()
+    df = _ensure_result_columns(results_df.copy())
     if 'created_at' not in df.columns:
         df['created_at'] = None
 
     df['created_at_dt'] = pd.to_datetime(df['created_at'], utc=True, errors='coerce')
     df = df[df['created_at_dt'].notna()].copy()
     if df.empty:
-        return df
+        return _ensure_result_columns(df)
 
     df['created_at_local'] = df['created_at_dt'].dt.tz_convert(LOCAL_TZ)
     df['created_date_local'] = df['created_at_local'].dt.date
@@ -111,16 +135,17 @@ def prepare_results_dataframe(results_df):
 
     # 只計算「全選(所有項目)」80題正式考試
     df = _filter_full_exam_only(df)
-    return df
+    return _ensure_result_columns(df)
 
 
 def filter_week_results(results_df, week_start_dt, week_end_dt):
     if results_df is None or results_df.empty:
-        return pd.DataFrame()
+        return _ensure_result_columns(pd.DataFrame())
     df = prepare_results_dataframe(results_df)
     if df.empty:
-        return df
-    return df[(df['created_at_local'] >= week_start_dt) & (df['created_at_local'] < week_end_dt)].copy()
+        return _ensure_result_columns(df)
+    filtered_df = df[(df['created_at_local'] >= week_start_dt) & (df['created_at_local'] < week_end_dt)].copy()
+    return _ensure_result_columns(filtered_df)
 
 
 def _pick_best_record(records_df):
