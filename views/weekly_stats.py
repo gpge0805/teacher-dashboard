@@ -1,9 +1,11 @@
+import io
+
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from utils.supabase_client import supabase
 from utils.weekly_stats import (
-    build_other_scores_display,
     build_primary_candidate_label,
     build_weekly_summary,
     current_local_time,
@@ -84,6 +86,99 @@ def _clear_override(student_id, week_start_dt):
     ).execute()
 
 
+def _format_score_cell(value):
+    num = pd.to_numeric(value, errors='coerce')
+    if pd.isna(num):
+        return "0"
+    return str(int(num)) if float(num).is_integer() else f"{float(num):.2f}"
+
+
+def _build_report_dataframe(summaries):
+    rows = []
+    for item in summaries:
+        other_scores = list(item.get('other_scores', []))
+        if len(other_scores) < 4:
+            other_scores.extend([0.0] * (4 - len(other_scores)))
+        rows.append(
+            {
+                '座號': safe_str(item.get('seat_number')),
+                '姓名': safe_str(item.get('student_name')),
+                '星期三成績1(50%)': _format_score_cell(item.get('primary_score', 0)),
+                '成績2': _format_score_cell(other_scores[0]),
+                '成績3': _format_score_cell(other_scores[1]),
+                '成績4': _format_score_cell(other_scores[2]),
+                '成績5': _format_score_cell(other_scores[3]),
+                '總成績': _format_score_cell(item.get('total_score', 0)),
+                '備註(及格不及格)': safe_str(item.get('status_text')),
+            }
+        )
+
+    report_df = pd.DataFrame(rows)
+    if report_df.empty:
+        return report_df
+
+    report_df['座號排序'] = pd.to_numeric(report_df['座號'], errors='coerce')
+    report_df = report_df.sort_values(by=['座號排序', '座號', '姓名'], ascending=[True, True, True], na_position='last')
+    return report_df.drop(columns=['座號排序'])
+
+
+def _build_report_header_text(selected_class, week_start_dt, week_end_dt, pass_score):
+    stats_time = f"{week_start_dt.strftime('%Y-%m-%d %H:%M')} ~ {(week_end_dt - pd.Timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M')}"
+    print_time = current_local_time().strftime('%Y-%m-%d %H:%M:%S')
+    class_text = selected_class if selected_class != "全部" else "全部班級"
+    calc_text = "星期三成績1占50%，其餘成績2-5取本週最高4筆平均占50%，不足補0。"
+    return {
+        '班級': class_text,
+        '統計時間': stats_time,
+        '及格分數': str(int(pass_score) if float(pass_score).is_integer() else pass_score),
+        '成績計算說明(簡略)': calc_text,
+        '列印時間': print_time,
+    }
+
+
+def _render_print_section(report_df, header_info):
+    if report_df.empty:
+        return
+
+    table_html = report_df.to_html(index=False, classes='report-table', border=1)
+    html = f"""
+    <div>
+      <button onclick=\"window.print()\" style=\"margin-bottom:10px;padding:8px 14px;border:1px solid #999;border-radius:6px;background:#fff;cursor:pointer;\">列印目前報表</button>
+      <div id=\"weekly-report\" style=\"font-family: 'Microsoft JhengHei', sans-serif; color:#111;\">
+        <h3 style=\"margin:0 0 8px 0;\">每週班級成績報表</h3>
+        <p style=\"margin:2px 0;\"><strong>班級：</strong>{header_info['班級']}</p>
+        <p style=\"margin:2px 0;\"><strong>統計時間：</strong>{header_info['統計時間']}</p>
+        <p style=\"margin:2px 0;\"><strong>及格分數：</strong>{header_info['及格分數']}</p>
+        <p style=\"margin:2px 0;\"><strong>成績計算說明(簡略)：</strong>{header_info['成績計算說明(簡略)']}</p>
+        <p style=\"margin:2px 0 10px 0;\"><strong>列印時間：</strong>{header_info['列印時間']}</p>
+        {table_html}
+      </div>
+      <style>
+        .report-table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
+        .report-table th, .report-table td {{ border: 1px solid #333; padding: 6px 8px; text-align: center; }}
+        .report-table th {{ background: #f0f0f0; }}
+        @media print {{
+          button {{ display: none !important; }}
+        }}
+      </style>
+    </div>
+    """
+    components.html(html, height=700, scrolling=True)
+
+
+def _to_excel_bytes(report_df, header_info):
+    output = io.BytesIO()
+    export_df = report_df.copy()
+    for key, value in header_info.items():
+        export_df.insert(len(export_df.columns), key if key not in export_df.columns else f"{key}_資訊", "")
+        export_df.at[0, key if key not in export_df.columns else f"{key}_資訊"] = value
+
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        export_df.to_excel(writer, index=False, sheet_name='每週成績報表')
+    output.seek(0)
+    return output.getvalue()
+
+
 def show():
     st.header("📅 每週成績統計")
     st.write("統計規則：每週三 00:00 到下週二 23:59:59；週三關鍵成績占 50%，其餘最高 4 筆占 50%。")
@@ -99,7 +194,10 @@ def show():
 
     top_col1, top_col2 = st.columns([2, 1])
     with top_col1:
-        class_options = ["全部"] + sorted([x for x in students_df['class_name'].dropna().unique().tolist() if safe_str(x)])
+        class_options = sorted([x for x in students_df['class_name'].dropna().unique().tolist() if safe_str(x)])
+        if not class_options:
+            st.info("目前沒有可統計的班級資料。")
+            return
         selected_class = st.selectbox("班級篩選", class_options)
     with top_col2:
         current_pass_score = load_weekly_pass_score(supabase)
@@ -113,9 +211,7 @@ def show():
                 st.error("❌ 儲存及格線失敗，請先確認 Supabase 已執行 weekly_stats_setup.sql。")
                 st.caption(str(exc))
 
-    visible_students_df = students_df.copy()
-    if selected_class != "全部":
-        visible_students_df = visible_students_df[visible_students_df['class_name'] == selected_class].copy()
+    visible_students_df = students_df[students_df['class_name'] == selected_class].copy()
 
     student_ids = [safe_str(sid) for sid in visible_students_df['student_id'].tolist() if safe_str(sid)]
     results_df = _load_week_results(student_ids, week_start_dt, week_end_dt)
@@ -130,28 +226,49 @@ def show():
         override_rows=override_rows,
     )
 
-    summary_df = pd.DataFrame([
-        {
-            '班級': item['class_name'],
-            '座號': item['seat_number'],
-            '學號': item['student_id'],
-            '姓名': item['student_name'],
-            '關鍵成績': item['primary_score'],
-            '關鍵來源': item['primary_source'],
-            '其他4筆': build_other_scores_display(item['other_scores']),
-            '其他平均': item['other_average'],
-            '總成績': item['total_score'],
-            '結果': item['status_text'],
-            '本週筆數': item['weekly_record_count'],
-        }
-        for item in summaries
-    ])
+    report_df = _build_report_dataframe(summaries)
+    header_info = _build_report_header_text(selected_class, week_start_dt, week_end_dt, pass_score)
 
-    st.markdown(f"### 本週統計表（{len(summary_df)} 人）")
-    if summary_df.empty:
+    st.markdown(f"### 本週統計表（{len(report_df)} 人）")
+    if report_df.empty:
         st.info("本週沒有可顯示的統計結果。")
     else:
-        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        st.markdown("#### 報表資訊")
+        info_df = pd.DataFrame([header_info])
+        st.dataframe(info_df, use_container_width=True, hide_index=True)
+
+        st.markdown("#### 班級成績總表")
+        st.dataframe(report_df, use_container_width=True, hide_index=True)
+
+        csv_data = report_df.to_csv(index=False).encode('utf-8-sig')
+        report_time_key = current_local_time().strftime('%Y%m%d_%H%M%S')
+        class_key = safe_str(header_info['班級']).replace(' ', '_') or 'all_classes'
+
+        dl_col1, dl_col2 = st.columns(2)
+        with dl_col1:
+            st.download_button(
+                label="⬇️ 下載 CSV 報表",
+                data=csv_data,
+                file_name=f"weekly_report_{class_key}_{report_time_key}.csv",
+                mime='text/csv',
+                use_container_width=True,
+            )
+        with dl_col2:
+            try:
+                excel_data = _to_excel_bytes(report_df, header_info)
+                st.download_button(
+                    label="⬇️ 下載 Excel 報表",
+                    data=excel_data,
+                    file_name=f"weekly_report_{class_key}_{report_time_key}.xlsx",
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    use_container_width=True,
+                )
+            except Exception as exc:
+                st.warning("目前無法產生 Excel，請先安裝 openpyxl。可先使用 CSV 下載。")
+                st.caption(str(exc))
+
+        st.markdown("#### 列印報表")
+        _render_print_section(report_df, header_info)
 
     st.divider()
     st.markdown("### 老師手動指定週三關鍵成績")
