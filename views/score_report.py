@@ -342,8 +342,10 @@ def show():
 
     # 2.6 找出重複上傳資料，並提供刪除功能
     duplicate_df = _find_duplicate_exam_rows(df)
-    if not duplicate_df.empty:
-        with st.expander(f"🔁 重複成績清理（{len(duplicate_df)} 筆）", expanded=False):
+    with st.expander(f"🔁 重複成績清理（{len(duplicate_df)} 筆）", expanded=False):
+        if duplicate_df.empty:
+            st.info("目前未偵測到重複成績資料。")
+        else:
             st.warning("以下資料疑似為重複上傳造成，建議保留第一筆、刪除重複筆。")
 
             duplicate_display_cols = {
