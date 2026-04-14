@@ -7,8 +7,10 @@ from utils.weekly_stats import (
     compute_student_weekly_stats,
     current_local_time,
     get_week_bounds,
+    load_teacher_settings,
     load_weekly_pass_score,
     safe_str,
+    WEEKDAY_LABELS,
 )
 
 
@@ -54,9 +56,9 @@ def _load_override(student_id, week_start_dt):
         return []
 
 
-def _build_week_options(num_weeks=12):
+def _build_week_options(num_weeks=12, week_start_weekday=2):
     """產生最近 num_weeks 週的選項清單，最新在前。"""
-    current_week_start, _ = get_week_bounds()
+    current_week_start, _ = get_week_bounds(week_start_weekday=week_start_weekday)
     options = []
     for i in range(num_weeks):
         ws = current_week_start - pd.Timedelta(weeks=i)
@@ -72,7 +74,17 @@ def show():
     st.title("📘 成績查詢")
     st.write("輸入學號後，可查看指定週次的統計成績。")
 
-    week_options = _build_week_options(12)
+    # 嘗試從 query_params 取得 teacher_username，讓學生查詢頁套用正確老師設定
+    query_params = st.query_params
+    teacher_username = safe_str(query_params.get('teacher', '')) or st.session_state.get('username', '')
+    ts = load_teacher_settings(supabase, teacher_username)
+
+    week_start_weekday = ts['week_start_weekday']
+    pass_score = ts['pass_score']
+    primary_slot_start = ts['primary_slot_start_hour']
+    primary_slot_end = ts['primary_slot_end_hour']
+
+    week_options = _build_week_options(12, week_start_weekday=week_start_weekday)
     week_labels = [opt[0] for opt in week_options]
     selected_week_index = st.selectbox(
         "查詢週次",
@@ -81,11 +93,10 @@ def show():
         index=0,
     )
     selected_week_start = week_options[selected_week_index][1]
-    week_start_dt, week_end_dt = get_week_bounds(reference_time=selected_week_start)
+    week_start_dt, week_end_dt = get_week_bounds(reference_time=selected_week_start, week_start_weekday=week_start_weekday)
     week_label = f"{week_start_dt.strftime('%Y-%m-%d %H:%M')} ~ {(week_end_dt - pd.Timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M')}"
     st.info(f"目前統計區間：{week_label}（台灣時間）")
 
-    query_params = st.query_params
     default_student_id = safe_str(query_params.get('student_id', ''))
     student_id = st.text_input("請輸入學號", value=default_student_id)
 
@@ -101,7 +112,6 @@ def show():
 
         results_df = _load_week_results(safe_str(student_id), week_start_dt, week_end_dt)
         override_rows = _load_override(safe_str(student_id), week_start_dt)
-        pass_score = load_weekly_pass_score(supabase)
         summary = compute_student_weekly_stats(
             student_row=student,
             results_df=results_df,
@@ -109,6 +119,8 @@ def show():
             week_end_dt=week_end_dt,
             pass_score=pass_score,
             override_rows=override_rows,
+            primary_slot_start_hour=primary_slot_start,
+            primary_slot_end_hour=primary_slot_end,
         )
 
         st.success(f"已更新：{current_local_time().strftime('%Y-%m-%d %H:%M:%S')}")

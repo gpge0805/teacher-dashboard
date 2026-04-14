@@ -10,10 +10,13 @@ from utils.weekly_stats import (
     build_weekly_summary,
     current_local_time,
     get_week_bounds,
+    load_teacher_settings,
     load_weekly_pass_score,
     prepare_results_dataframe,
+    save_teacher_settings,
     save_weekly_pass_score,
     safe_str,
+    WEEKDAY_LABELS,
 )
 
 
@@ -180,9 +183,9 @@ def _to_excel_bytes(report_df, header_info):
     return output.getvalue()
 
 
-def _build_week_options(num_weeks=12):
+def _build_week_options(num_weeks=12, week_start_weekday=2):
     """產生最近 num_weeks 週的選項清單，最新在前。"""
-    current_week_start, _ = get_week_bounds()
+    current_week_start, _ = get_week_bounds(week_start_weekday=week_start_weekday)
     options = []
     for i in range(num_weeks):
         ws = current_week_start - pd.Timedelta(weeks=i)
@@ -196,10 +199,71 @@ def _build_week_options(num_weeks=12):
 
 def show():
     st.header("📅 每週成績統計")
-    st.write("統計規則：每週三 00:00 到下週二 23:59:59；週三關鍵成績占 50%，其餘最高 4 筆占 50%。")
     st.caption("學生公開查詢連結格式：正式後台網址後加上 ?view=student-weekly")
 
-    week_options = _build_week_options(12)
+    teacher_username = st.session_state.get('username', '')
+    ts = load_teacher_settings(supabase, teacher_username)
+
+    # ── 老師個人設定區 ──────────────────────────────────────────
+    with st.expander("⚙️ 成績統計週期設定", expanded=False):
+        st.caption("設定儲存後，下方統計與學生查詢頁都會套用你的個人設定。")
+        cfg_col1, cfg_col2, cfg_col3, cfg_col4 = st.columns(4)
+        weekday_options = list(WEEKDAY_LABELS.keys())   # [0,1,2,3,4,5,6]
+        with cfg_col1:
+            cfg_weekday = st.selectbox(
+                "週期起始星期",
+                weekday_options,
+                format_func=lambda d: WEEKDAY_LABELS[d],
+                index=weekday_options.index(ts['week_start_weekday']),
+                help="每週統計從哪天 00:00 開始",
+            )
+        with cfg_col2:
+            cfg_pass_score = st.number_input(
+                "及格線", min_value=0, max_value=100,
+                value=ts['pass_score'], step=1,
+            )
+        with cfg_col3:
+            cfg_slot_start = st.number_input(
+                "關鍵時段（開始小時）", min_value=0, max_value=23,
+                value=ts['primary_slot_start_hour'], step=1,
+                help="例如 15 → 15:00",
+            )
+        with cfg_col4:
+            cfg_slot_end = st.number_input(
+                "關鍵時段（結束小時）", min_value=1, max_value=24,
+                value=ts['primary_slot_end_hour'], step=1,
+                help="例如 16 → 到 15:59 截止",
+            )
+        if st.button("💾 儲存個人設定", use_container_width=True):
+            if int(cfg_slot_start) >= int(cfg_slot_end):
+                st.error("關鍵時段結束小時必須大於開始小時。")
+            else:
+                try:
+                    save_teacher_settings(
+                        supabase, teacher_username,
+                        pass_score=cfg_pass_score,
+                        week_start_weekday=cfg_weekday,
+                        primary_slot_start_hour=cfg_slot_start,
+                        primary_slot_end_hour=cfg_slot_end,
+                    )
+                    st.success("✅ 個人設定已儲存。")
+                    st.rerun()
+                except Exception as exc:
+                    st.error("❌ 儲存失敗，請先在 Supabase 執行 teacher_cycle_settings_migration.sql。")
+                    st.caption(str(exc))
+
+    week_start_weekday = ts['week_start_weekday']
+    pass_score = ts['pass_score']
+    primary_slot_start = ts['primary_slot_start_hour']
+    primary_slot_end = ts['primary_slot_end_hour']
+
+    st.write(
+        f"統計規則：每週 **{WEEKDAY_LABELS[week_start_weekday]}** 00:00 到下週"
+        f" **{WEEKDAY_LABELS[(week_start_weekday + 6) % 7]}** 23:59:59；"
+        f"關鍵時段 **{primary_slot_start:02d}:00–{primary_slot_end:02d}:00** 成績占 50%，其餘最高 4 筆占 50%。"
+    )
+
+    week_options = _build_week_options(12, week_start_weekday=week_start_weekday)
     week_labels = [opt[0] for opt in week_options]
     selected_week_index = st.selectbox(
         "查詢週次",
@@ -208,7 +272,7 @@ def show():
         index=0,
     )
     selected_week_start = week_options[selected_week_index][1]
-    week_start_dt, week_end_dt = get_week_bounds(reference_time=selected_week_start)
+    week_start_dt, week_end_dt = get_week_bounds(reference_time=selected_week_start, week_start_weekday=week_start_weekday)
     st.info(f"目前統計區間：{week_start_dt.strftime('%Y-%m-%d %H:%M')} ~ {(week_end_dt - pd.Timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M')}")
 
     students_df = _load_visible_students()
@@ -216,24 +280,11 @@ def show():
         st.info("目前沒有可統計的學生資料。")
         return
 
-    top_col1, top_col2 = st.columns([2, 1])
-    with top_col1:
-        class_options = sorted([x for x in students_df['class_name'].dropna().unique().tolist() if safe_str(x)])
-        if not class_options:
-            st.info("目前沒有可統計的班級資料。")
-            return
-        selected_class = st.selectbox("班級篩選", class_options)
-    with top_col2:
-        current_pass_score = load_weekly_pass_score(supabase)
-        pass_score = st.number_input("及格線", min_value=0, max_value=100, value=current_pass_score, step=1)
-        if st.button("儲存及格線", use_container_width=True):
-            try:
-                save_weekly_pass_score(supabase, pass_score, st.session_state.get('username', ''))
-                st.success("✅ 已更新全域及格線設定。")
-                st.rerun()
-            except Exception as exc:
-                st.error("❌ 儲存及格線失敗，請先確認 Supabase 已執行 weekly_stats_setup.sql。")
-                st.caption(str(exc))
+    class_options = sorted([x for x in students_df['class_name'].dropna().unique().tolist() if safe_str(x)])
+    if not class_options:
+        st.info("目前沒有可統計的班級資料。")
+        return
+    selected_class = st.selectbox("班級篩選", class_options)
 
     visible_students_df = students_df[students_df['class_name'] == selected_class].copy()
 
@@ -253,6 +304,8 @@ def show():
         week_end_dt=week_end_dt,
         pass_score=pass_score,
         override_rows=override_rows,
+        primary_slot_start_hour=primary_slot_start,
+        primary_slot_end_hour=primary_slot_end,
     )
 
     report_df = _build_report_dataframe(summaries)

@@ -10,6 +10,11 @@ PRIMARY_SLOT_START_HOUR = 15
 PRIMARY_SLOT_END_HOUR = 16
 DEFAULT_WEEKLY_PASS_SCORE = 60
 
+WEEKDAY_LABELS = {
+    0: '星期一', 1: '星期二', 2: '星期三',
+    3: '星期四', 4: '星期五', 5: '星期六', 6: '星期日',
+}
+
 # 週統計只計算「全選(所有項目)」且 80 題的正式考試
 FULL_EXAM_QUESTION_COUNT = 80
 FULL_EXAM_CATEGORIES_LABEL = "全選 (所有項目)"
@@ -91,7 +96,13 @@ def current_local_time():
     return pd.Timestamp.now(tz=LOCAL_TZ)
 
 
-def get_week_bounds(reference_time=None):
+def get_week_bounds(reference_time=None, week_start_weekday=None):
+    """回傳 (week_start_dt, week_end_dt)。
+    week_start_weekday: 0=一, 1=二, 2=三, ..., 6=日；None 時用模組預設值。
+    """
+    if week_start_weekday is None:
+        week_start_weekday = WEEK_START_WEEKDAY
+
     if reference_time is None:
         local_now = current_local_time()
     else:
@@ -102,8 +113,8 @@ def get_week_bounds(reference_time=None):
             local_now = local_now.tz_convert(LOCAL_TZ)
 
     local_date = local_now.date()
-    days_since_wednesday = (local_date.weekday() - WEEK_START_WEEKDAY) % 7
-    week_start_date = local_date - timedelta(days=days_since_wednesday)
+    days_since_start = (local_date.weekday() - week_start_weekday) % 7
+    week_start_date = local_date - timedelta(days=days_since_start)
     week_start_dt = pd.Timestamp(datetime.combine(week_start_date, datetime.min.time()), tz=LOCAL_TZ)
     week_end_dt = week_start_dt + pd.Timedelta(days=7)
     return week_start_dt, week_end_dt
@@ -180,7 +191,8 @@ def _override_lookup(override_rows):
     return lookup
 
 
-def compute_student_weekly_stats(student_row, results_df, week_start_dt, week_end_dt, pass_score=60, override_rows=None):
+def compute_student_weekly_stats(student_row, results_df, week_start_dt, week_end_dt, pass_score=60, override_rows=None,
+                                 primary_slot_start_hour=None, primary_slot_end_hour=None):
     student_id = safe_str(student_row.get('student_id'))
     student_name = safe_str(student_row.get('name') or student_row.get('student_name'))
 
@@ -206,13 +218,15 @@ def compute_student_weekly_stats(student_row, results_df, week_start_dt, week_en
             primary_source = '教師指定'
 
     if primary_record is None:
+        slot_start = primary_slot_start_hour if primary_slot_start_hour is not None else PRIMARY_SLOT_START_HOUR
+        slot_end = primary_slot_end_hour if primary_slot_end_hour is not None else PRIMARY_SLOT_END_HOUR
         primary_slot_df = wednesday_df[
-            (wednesday_df['created_hour_local'] >= PRIMARY_SLOT_START_HOUR) &
-            (wednesday_df['created_hour_local'] < PRIMARY_SLOT_END_HOUR)
+            (wednesday_df['created_hour_local'] >= slot_start) &
+            (wednesday_df['created_hour_local'] < slot_end)
         ].copy()
         primary_record = _pick_best_record(primary_slot_df)
         if primary_record:
-            primary_source = '週三 15:00-15:59'
+            primary_source = f'關鍵時段 {slot_start:02d}:00-{slot_end:02d}:00'
 
     primary_score = normalize_score(primary_record.get('score_num') if primary_record else 0.0)
     primary_component = primary_score * 0.5
@@ -264,7 +278,8 @@ def compute_student_weekly_stats(student_row, results_df, week_start_dt, week_en
     }
 
 
-def build_weekly_summary(students_df, results_df, week_start_dt, week_end_dt, pass_score=60, override_rows=None):
+def build_weekly_summary(students_df, results_df, week_start_dt, week_end_dt, pass_score=60, override_rows=None,
+                         primary_slot_start_hour=None, primary_slot_end_hour=None):
     if students_df is None or students_df.empty:
         return []
 
@@ -278,6 +293,8 @@ def build_weekly_summary(students_df, results_df, week_start_dt, week_end_dt, pa
                 week_end_dt=week_end_dt,
                 pass_score=pass_score,
                 override_rows=override_rows,
+                primary_slot_start_hour=primary_slot_start_hour,
+                primary_slot_end_hour=primary_slot_end_hour,
             )
         )
     return summaries
@@ -296,27 +313,76 @@ def build_primary_candidate_label(record):
     return f"{time_label} | 分數 {score:g} | 答對 {normalize_score(record.get('correct_count_num', record.get('correct_count'))):g}"
 
 
-def load_weekly_pass_score(supabase_client):
+def _get_settings_row(supabase_client, setting_key):
+    """讀取 weekly_stats_settings 中指定 key 的整列，找不到回傳 None。"""
     try:
         response = (
             supabase_client.table("weekly_stats_settings")
-            .select("pass_score")
-            .eq("setting_key", "global")
+            .select("*")
+            .eq("setting_key", setting_key)
             .limit(1)
             .execute()
         )
         data = response.data or []
-        if not data:
-            return DEFAULT_WEEKLY_PASS_SCORE
-        return int(normalize_score(data[0].get('pass_score', DEFAULT_WEEKLY_PASS_SCORE)))
+        return data[0] if data else None
     except Exception:
-        return DEFAULT_WEEKLY_PASS_SCORE
+        return None
+
+
+def load_teacher_settings(supabase_client, teacher_username=""):
+    """載入老師個人設定，找不到時退回 global，global 也沒有時用程式預設值。
+    回傳 dict：pass_score, week_start_weekday, primary_slot_start_hour, primary_slot_end_hour
+    """
+    defaults = {
+        'pass_score': DEFAULT_WEEKLY_PASS_SCORE,
+        'week_start_weekday': WEEK_START_WEEKDAY,
+        'primary_slot_start_hour': PRIMARY_SLOT_START_HOUR,
+        'primary_slot_end_hour': PRIMARY_SLOT_END_HOUR,
+    }
+    row = None
+    if safe_str(teacher_username):
+        row = _get_settings_row(supabase_client, safe_str(teacher_username))
+    if row is None:
+        row = _get_settings_row(supabase_client, 'global')
+    if row is None:
+        return defaults
+    return {
+        'pass_score': int(normalize_score(row.get('pass_score', defaults['pass_score']))),
+        'week_start_weekday': int(row.get('week_start_weekday', defaults['week_start_weekday'])),
+        'primary_slot_start_hour': int(row.get('primary_slot_start_hour', defaults['primary_slot_start_hour'])),
+        'primary_slot_end_hour': int(row.get('primary_slot_end_hour', defaults['primary_slot_end_hour'])),
+    }
+
+
+def save_teacher_settings(supabase_client, teacher_username, pass_score, week_start_weekday,
+                          primary_slot_start_hour, primary_slot_end_hour):
+    """儲存老師個人設定（upsert 以 teacher_username 為 key）。"""
+    payload = {
+        "setting_key": safe_str(teacher_username),
+        "pass_score": int(normalize_score(pass_score)),
+        "week_start_weekday": int(week_start_weekday),
+        "primary_slot_start_hour": int(primary_slot_start_hour),
+        "primary_slot_end_hour": int(primary_slot_end_hour),
+        "updated_by": safe_str(teacher_username),
+        "updated_at": current_local_time().tz_convert('UTC').isoformat(),
+    }
+    supabase_client.table("weekly_stats_settings").upsert(payload, on_conflict="setting_key").execute()
+
+
+# ── 向下相容舊介面 ──────────────────────────────────────────────────────────────
+def load_weekly_pass_score(supabase_client):
+    return load_teacher_settings(supabase_client).get('pass_score', DEFAULT_WEEKLY_PASS_SCORE)
 
 
 def save_weekly_pass_score(supabase_client, pass_score, teacher_username=""):
+    """保留舊介面；只更新 global 的 pass_score，不動其他欄位。"""
+    row = _get_settings_row(supabase_client, 'global') or {}
     payload = {
         "setting_key": "global",
         "pass_score": int(normalize_score(pass_score)),
+        "week_start_weekday": int(row.get('week_start_weekday', WEEK_START_WEEKDAY)),
+        "primary_slot_start_hour": int(row.get('primary_slot_start_hour', PRIMARY_SLOT_START_HOUR)),
+        "primary_slot_end_hour": int(row.get('primary_slot_end_hour', PRIMARY_SLOT_END_HOUR)),
         "updated_by": safe_str(teacher_username),
         "updated_at": current_local_time().tz_convert('UTC').isoformat(),
     }
