@@ -180,13 +180,36 @@ def _to_excel_bytes(report_df, header_info):
     return output.getvalue()
 
 
+def _build_week_options(num_weeks=12):
+    """產生最近 num_weeks 週的選項清單，最新在前。"""
+    current_week_start, _ = get_week_bounds()
+    options = []
+    for i in range(num_weeks):
+        ws = current_week_start - pd.Timedelta(weeks=i)
+        we = ws + pd.Timedelta(days=7)
+        label = f"{ws.strftime('%Y-%m-%d')} ~ {(we - pd.Timedelta(seconds=1)).strftime('%Y-%m-%d')}"
+        if i == 0:
+            label += "（本週）"
+        options.append((label, ws))
+    return options
+
+
 def show():
     st.header("📅 每週成績統計")
     st.write("統計規則：每週三 00:00 到下週二 23:59:59；週三關鍵成績占 50%，其餘最高 4 筆占 50%。")
     st.caption("學生公開查詢連結格式：正式後台網址後加上 ?view=student-weekly")
 
-    week_start_dt, week_end_dt = get_week_bounds()
-    st.info(f"本週統計區間：{week_start_dt.strftime('%Y-%m-%d %H:%M')} ~ {(week_end_dt - pd.Timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M')}")
+    week_options = _build_week_options(12)
+    week_labels = [opt[0] for opt in week_options]
+    selected_week_index = st.selectbox(
+        "查詢週次",
+        range(len(week_labels)),
+        format_func=lambda i: week_labels[i],
+        index=0,
+    )
+    selected_week_start = week_options[selected_week_index][1]
+    week_start_dt, week_end_dt = get_week_bounds(reference_time=selected_week_start)
+    st.info(f"目前統計區間：{week_start_dt.strftime('%Y-%m-%d %H:%M')} ~ {(week_end_dt - pd.Timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M')}")
 
     students_df = _load_visible_students()
     if students_df.empty:

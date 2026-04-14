@@ -54,11 +54,34 @@ def _load_override(student_id, week_start_dt):
         return []
 
 
-def show():
-    st.title("📘 本週成績查詢")
-    st.write("輸入學號後，可即時查看本週統計成績。")
+def _build_week_options(num_weeks=12):
+    """產生最近 num_weeks 週的選項清單，最新在前。"""
+    current_week_start, _ = get_week_bounds()
+    options = []
+    for i in range(num_weeks):
+        ws = current_week_start - pd.Timedelta(weeks=i)
+        we = ws + pd.Timedelta(days=7)
+        label = f"{ws.strftime('%Y-%m-%d')} ~ {(we - pd.Timedelta(seconds=1)).strftime('%Y-%m-%d')}"
+        if i == 0:
+            label += "（本週）"
+        options.append((label, ws))
+    return options
 
-    week_start_dt, week_end_dt = get_week_bounds()
+
+def show():
+    st.title("📘 成績查詢")
+    st.write("輸入學號後，可查看指定週次的統計成績。")
+
+    week_options = _build_week_options(12)
+    week_labels = [opt[0] for opt in week_options]
+    selected_week_index = st.selectbox(
+        "查詢週次",
+        range(len(week_labels)),
+        format_func=lambda i: week_labels[i],
+        index=0,
+    )
+    selected_week_start = week_options[selected_week_index][1]
+    week_start_dt, week_end_dt = get_week_bounds(reference_time=selected_week_start)
     week_label = f"{week_start_dt.strftime('%Y-%m-%d %H:%M')} ~ {(week_end_dt - pd.Timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M')}"
     st.info(f"目前統計區間：{week_label}（台灣時間）")
 
@@ -66,7 +89,7 @@ def show():
     default_student_id = safe_str(query_params.get('student_id', ''))
     student_id = st.text_input("請輸入學號", value=default_student_id)
 
-    if st.button("查詢本週成績", type="primary"):
+    if st.button("查詢成績", type="primary"):
         if not safe_str(student_id):
             st.error("請輸入學號。")
             return
