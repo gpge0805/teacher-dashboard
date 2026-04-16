@@ -17,7 +17,7 @@ from utils.weekly_stats import (
 def _load_student(student_id):
     response = (
         supabase.table("students")
-        .select("student_id,name,class_name,seat_number")
+        .select("student_id,name,class_name,seat_number,teacher_username")
         .eq("student_id", student_id)
         .limit(1)
         .execute()
