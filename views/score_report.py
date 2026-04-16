@@ -3,6 +3,7 @@ import streamlit.components.v1 as components
 import pandas as pd
 import json
 from utils.supabase_client import supabase
+from utils.weekly_stats import save_teacher_settings, load_teacher_settings
 
 
 def _safe_str(value):
@@ -231,6 +232,11 @@ def _find_duplicate_exam_rows(result_df, window_seconds=60):
 def show():
     st.header("📝 成績報表查詢")
     st.write("您可以在此查看學生的測驗成績，並進行篩選與匯出。")
+    
+    # 取得老師身份並載入設定
+    teacher_username = st.session_state.get('username', '')
+    teacher_settings = load_teacher_settings(supabase, teacher_username)
+    default_pass_score = teacher_settings['pass_score']
     
     # 1. 從 Supabase 撈取成績資料 (依時間遞減排序)
     response = supabase.table("exam_results").select("*").order("created_at", desc=True).execute()
@@ -483,7 +489,31 @@ def show():
     with option_col1:
         include_unscored_students = st.checkbox("補列未測學生", help="勾選後，會把所選班級中未出現在目前篩選結果內的學生一併列出，並標註為無成績。")
     with option_col2:
-        pass_score = st.number_input("及格分數", min_value=0, max_value=100, value=60, step=1)
+        def _on_pass_score_change():
+            """及格分數改變時自動保存到資料庫"""
+            new_pass_score = st.session_state.get('pass_score_input', default_pass_score)
+            try:
+                save_teacher_settings(
+                    supabase,
+                    teacher_username,
+                    pass_score=new_pass_score,
+                    week_start_weekday=teacher_settings['week_start_weekday'],
+                    primary_slot_start_hour=teacher_settings['primary_slot_start_hour'],
+                    primary_slot_end_hour=teacher_settings['primary_slot_end_hour'],
+                )
+                st.toast(f"✓ 及格分數已更新為 {new_pass_score}", icon="✅")
+            except Exception as e:
+                st.error(f"保存及格分數時出錯: {e}")
+        
+        pass_score = st.number_input(
+            "及格分數", 
+            min_value=0, 
+            max_value=100, 
+            value=default_pass_score,
+            step=1,
+            key='pass_score_input',
+            on_change=_on_pass_score_change
+        )
 
     valid_dates = df['created_at_dt'].dropna()
     if valid_dates.empty:
