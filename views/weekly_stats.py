@@ -202,9 +202,10 @@ def show():
     st.caption("學生公開查詢連結格式：正式後台網址後加上 ?view=student-weekly")
 
     teacher_username = st.session_state.get('username', '')
-    ts = load_teacher_settings(supabase, teacher_username)
+    
+    # ── 全局周期設定區（不因班級改變）──────────────────────────────────────────
+    ts_global = load_teacher_settings(supabase, teacher_username, "")
 
-    # ── 老師個人設定區 ──────────────────────────────────────────
     with st.expander("⚙️ 成績統計週期設定", expanded=False):
         st.caption("設定儲存後，下方統計與學生查詢頁都會套用你的個人設定。")
         cfg_col1, cfg_col2, cfg_col3, cfg_col4 = st.columns(4)
@@ -214,48 +215,43 @@ def show():
                 "週期起始星期",
                 weekday_options,
                 format_func=lambda d: WEEKDAY_LABELS[d],
-                index=weekday_options.index(ts['week_start_weekday']),
+                index=weekday_options.index(ts_global['week_start_weekday']),
                 help="每週統計從哪天 00:00 開始",
             )
         with cfg_col2:
-            cfg_pass_score = st.number_input(
-                "及格線", min_value=0, max_value=100,
-                value=ts['pass_score'], step=1,
-            )
-        with cfg_col3:
             cfg_slot_start = st.number_input(
                 "關鍵時段（開始小時）", min_value=0, max_value=23,
-                value=ts['primary_slot_start_hour'], step=1,
+                value=ts_global['primary_slot_start_hour'], step=1,
                 help="例如 15 → 15:00",
             )
-        with cfg_col4:
+        with cfg_col3:
             cfg_slot_end = st.number_input(
                 "關鍵時段（結束小時）", min_value=1, max_value=24,
-                value=ts['primary_slot_end_hour'], step=1,
+                value=ts_global['primary_slot_end_hour'], step=1,
                 help="例如 16 → 到 15:59 截止",
             )
-        if st.button("💾 儲存個人設定", use_container_width=True):
+        if st.button("💾 儲存週期設定", use_container_width=True):
             if int(cfg_slot_start) >= int(cfg_slot_end):
                 st.error("關鍵時段結束小時必須大於開始小時。")
             else:
                 try:
                     save_teacher_settings(
                         supabase, teacher_username,
-                        pass_score=cfg_pass_score,
+                        pass_score=ts_global['pass_score'],
                         week_start_weekday=cfg_weekday,
                         primary_slot_start_hour=cfg_slot_start,
                         primary_slot_end_hour=cfg_slot_end,
+                        class_name="",
                     )
-                    st.success("✅ 個人設定已儲存。")
+                    st.success("✅ 週期設定已儲存。")
                     st.rerun()
                 except Exception as exc:
                     st.error("❌ 儲存失敗，請先在 Supabase 執行 teacher_cycle_settings_migration.sql。")
                     st.caption(str(exc))
 
-    week_start_weekday = ts['week_start_weekday']
-    pass_score = ts['pass_score']
-    primary_slot_start = ts['primary_slot_start_hour']
-    primary_slot_end = ts['primary_slot_end_hour']
+    week_start_weekday = ts_global['week_start_weekday']
+    primary_slot_start = ts_global['primary_slot_start_hour']
+    primary_slot_end = ts_global['primary_slot_end_hour']
 
     st.write(
         f"統計規則：每週 **{WEEKDAY_LABELS[week_start_weekday]}** 00:00 到下週"
@@ -285,6 +281,35 @@ def show():
         st.info("目前沒有可統計的班級資料。")
         return
     selected_class = st.selectbox("班級篩選", class_options)
+
+    # ── 班級級及格標準設定區（根據選定班級變化）──────────────────────────────────────────
+    ts_class = load_teacher_settings(supabase, teacher_username, selected_class)
+    with st.expander(f"⚙️ 【{selected_class}】及格標準設定", expanded=False):
+        st.caption(f"設定儲存後，該班級的成績統計與學生查詢會套用此及格標準。")
+        pass_score_input = st.number_input(
+            "及格標準（分數）", 
+            min_value=0, max_value=100,
+            value=ts_class['pass_score'], 
+            step=1,
+            help=f"預設值為全局設定 {ts_global['pass_score']} 分",
+        )
+        if st.button(f"💾 儲存【{selected_class}】設定", use_container_width=True):
+            try:
+                save_teacher_settings(
+                    supabase, teacher_username,
+                    pass_score=pass_score_input,
+                    week_start_weekday=ts_global['week_start_weekday'],
+                    primary_slot_start_hour=ts_global['primary_slot_start_hour'],
+                    primary_slot_end_hour=ts_global['primary_slot_end_hour'],
+                    class_name=selected_class,
+                )
+                st.success(f"✅ 【{selected_class}】及格標準已儲存為 {pass_score_input} 分。")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"❌ 儲存失敗，請確認班級名稱或聯絡系統管理員。")
+                st.caption(str(exc))
+
+    pass_score = ts_class['pass_score']
 
     visible_students_df = students_df[students_df['class_name'] == selected_class].copy()
 

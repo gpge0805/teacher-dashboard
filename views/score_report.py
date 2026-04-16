@@ -233,10 +233,8 @@ def show():
     st.header("📝 成績報表查詢")
     st.write("您可以在此查看學生的測驗成績，並進行篩選與匯出。")
     
-    # 取得老師身份並載入設定
+    # 取得老師身份
     teacher_username = st.session_state.get('username', '')
-    teacher_settings = load_teacher_settings(supabase, teacher_username)
-    default_pass_score = teacher_settings['pass_score']
     
     # 1. 從 Supabase 撈取成績資料 (依時間遞減排序)
     response = supabase.table("exam_results").select("*").order("created_at", desc=True).execute()
@@ -489,8 +487,19 @@ def show():
     with option_col1:
         include_unscored_students = st.checkbox("補列未測學生", help="勾選後，會把所選班級中未出現在目前篩選結果內的學生一併列出，並標註為無成績。")
     with option_col2:
+        # 根據選中的班級載入設定
+        if selected_class != "全部":
+            teacher_settings = load_teacher_settings(supabase, teacher_username, selected_class)
+            current_class = selected_class
+        else:
+            # 如果是「全部」，載入老師全局設定
+            teacher_settings = load_teacher_settings(supabase, teacher_username, "")
+            current_class = None
+        
+        default_pass_score = teacher_settings['pass_score']
+        
         def _on_pass_score_change():
-            """及格分數改變時自動保存到資料庫"""
+            """及格標準改變時自動保存到資料庫"""
             new_pass_score = st.session_state.get('pass_score_input', default_pass_score)
             try:
                 save_teacher_settings(
@@ -500,19 +509,22 @@ def show():
                     week_start_weekday=teacher_settings['week_start_weekday'],
                     primary_slot_start_hour=teacher_settings['primary_slot_start_hour'],
                     primary_slot_end_hour=teacher_settings['primary_slot_end_hour'],
+                    class_name=current_class or "",
                 )
-                st.toast(f"✓ 及格分數已更新為 {new_pass_score}", icon="✅")
+                class_label = f"【{current_class}】" if current_class else "【全局設定】"
+                st.toast(f"✓ 及格標準已更新為 {new_pass_score} {class_label}", icon="✅")
             except Exception as e:
-                st.error(f"保存及格分數時出錯: {e}")
+                st.error(f"保存及格標準時出錯: {e}")
         
         pass_score = st.number_input(
-            "及格分數", 
+            "及格標準", 
             min_value=0, 
             max_value=100, 
             value=default_pass_score,
             step=1,
             key='pass_score_input',
-            on_change=_on_pass_score_change
+            on_change=_on_pass_score_change,
+            help=f"目前班級：{selected_class if selected_class != '全部' else '全局'}"
         )
 
     valid_dates = df['created_at_dt'].dropna()

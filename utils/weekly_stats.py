@@ -329,8 +329,14 @@ def _get_settings_row(supabase_client, setting_key):
         return None
 
 
-def load_teacher_settings(supabase_client, teacher_username=""):
-    """載入老師個人設定，找不到時退回 global，global 也沒有時用程式預設值。
+def load_teacher_settings(supabase_client, teacher_username="", class_name=""):
+    """載入老師班級設定，支援班級粒度。查詢優先順序：teacher:class → teacher → global → 預設值。
+    
+    Args:
+        supabase_client: Supabase 客戶端
+        teacher_username: 老師帳號
+        class_name: 班級名稱（可選，若提供則優先查班級設定）
+    
     回傳 dict：pass_score, week_start_weekday, primary_slot_start_hour, primary_slot_end_hour
     """
     defaults = {
@@ -340,12 +346,24 @@ def load_teacher_settings(supabase_client, teacher_username=""):
         'primary_slot_end_hour': PRIMARY_SLOT_END_HOUR,
     }
     row = None
-    if safe_str(teacher_username):
+    
+    # 優先查詢班級特定設定（teacher_username:class_name）
+    if safe_str(teacher_username) and safe_str(class_name):
+        class_key = f"{safe_str(teacher_username)}:{safe_str(class_name)}"
+        row = _get_settings_row(supabase_client, class_key)
+    
+    # 回退到老師全局設定（teacher_username）
+    if row is None and safe_str(teacher_username):
         row = _get_settings_row(supabase_client, safe_str(teacher_username))
+    
+    # 回退到全球設定（global）
     if row is None:
         row = _get_settings_row(supabase_client, 'global')
+    
+    # 若皆無則使用程式預設值
     if row is None:
         return defaults
+    
     return {
         'pass_score': int(normalize_score(row.get('pass_score', defaults['pass_score']))),
         'week_start_weekday': int(row.get('week_start_weekday', defaults['week_start_weekday'])),
@@ -355,10 +373,25 @@ def load_teacher_settings(supabase_client, teacher_username=""):
 
 
 def save_teacher_settings(supabase_client, teacher_username, pass_score, week_start_weekday,
-                          primary_slot_start_hour, primary_slot_end_hour):
-    """儲存老師個人設定（upsert 以 teacher_username 為 key）。"""
+                          primary_slot_start_hour, primary_slot_end_hour, class_name=""):
+    """儲存老師班級設定（支援班級粒度，upsert 以組合 key 進行）。
+    
+    Args:
+        supabase_client: Supabase 客戶端
+        teacher_username: 老師帳號
+        pass_score: 及格標準
+        week_start_weekday: 週開始日（0-6）
+        primary_slot_start_hour: 關鍵時段開始時期
+        primary_slot_end_hour: 關鍵時段結束時期
+        class_name: 班級名稱（可選）
+    """
+    if safe_str(class_name):
+        setting_key = f"{safe_str(teacher_username)}:{safe_str(class_name)}"
+    else:
+        setting_key = safe_str(teacher_username)
+    
     payload = {
-        "setting_key": safe_str(teacher_username),
+        "setting_key": setting_key,
         "pass_score": int(normalize_score(pass_score)),
         "week_start_weekday": int(week_start_weekday),
         "primary_slot_start_hour": int(primary_slot_start_hour),

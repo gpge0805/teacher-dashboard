@@ -74,29 +74,10 @@ def show():
     st.title("📘 成績查詢")
     st.write("輸入學號後，可查看指定週次的統計成績。")
 
-    # 嘗試從 query_params 取得 teacher_username，讓學生查詢頁套用正確老師設定
+    # 首先取得 query params 中的老師參數（如果有的話作為備用）
     query_params = st.query_params
-    teacher_username = safe_str(query_params.get('teacher', '')) or st.session_state.get('username', '')
-    ts = load_teacher_settings(supabase, teacher_username)
-
-    week_start_weekday = ts['week_start_weekday']
-    pass_score = ts['pass_score']
-    primary_slot_start = ts['primary_slot_start_hour']
-    primary_slot_end = ts['primary_slot_end_hour']
-
-    week_options = _build_week_options(12, week_start_weekday=week_start_weekday)
-    week_labels = [opt[0] for opt in week_options]
-    selected_week_index = st.selectbox(
-        "查詢週次",
-        range(len(week_labels)),
-        format_func=lambda i: week_labels[i],
-        index=0,
-    )
-    selected_week_start = week_options[selected_week_index][1]
-    week_start_dt, week_end_dt = get_week_bounds(reference_time=selected_week_start, week_start_weekday=week_start_weekday)
-    week_label = f"{week_start_dt.strftime('%Y-%m-%d %H:%M')} ~ {(week_end_dt - pd.Timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M')}"
-    st.info(f"目前統計區間：{week_label}（台灣時間）")
-
+    teacher_username_param = safe_str(query_params.get('teacher', ''))
+    
     default_student_id = safe_str(query_params.get('student_id', ''))
     student_id = st.text_input("請輸入學號", value=default_student_id)
 
@@ -109,6 +90,30 @@ def show():
         if not student:
             st.error("查無此學號，請確認是否輸入正確。")
             return
+
+        # 根據學生資訊取得該班級的設定（優先用學生的班級，再用 query param 的老師）
+        student_teacher = safe_str(student.get('teacher_username', teacher_username_param)) or teacher_username_param
+        student_class = safe_str(student.get('class_name', ''))
+        
+        ts = load_teacher_settings(supabase, student_teacher, student_class)
+
+        week_start_weekday = ts['week_start_weekday']
+        pass_score = ts['pass_score']
+        primary_slot_start = ts['primary_slot_start_hour']
+        primary_slot_end = ts['primary_slot_end_hour']
+
+        week_options = _build_week_options(12, week_start_weekday=week_start_weekday)
+        week_labels = [opt[0] for opt in week_options]
+        selected_week_index = st.selectbox(
+            "查詢週次",
+            range(len(week_labels)),
+            format_func=lambda i: week_labels[i],
+            index=0,
+        )
+        selected_week_start = week_options[selected_week_index][1]
+        week_start_dt, week_end_dt = get_week_bounds(reference_time=selected_week_start, week_start_weekday=week_start_weekday)
+        week_label = f"{week_start_dt.strftime('%Y-%m-%d %H:%M')} ~ {(week_end_dt - pd.Timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M')}"
+        st.info(f"目前統計區間：{week_label}（台灣時間）")
 
         results_df = _load_week_results(safe_str(student_id), week_start_dt, week_end_dt)
         override_rows = _load_override(safe_str(student_id), week_start_dt)
@@ -131,7 +136,7 @@ def show():
 
         score_col1, score_col2, score_col3 = st.columns(3)
         score_col1.metric("本週總成績", summary['total_score'])
-        score_col2.metric("及格線", summary['pass_score'])
+        score_col2.metric("及格標準", summary['pass_score'])
         score_col3.metric("結果", summary['status_text'])
 
         st.markdown("### 成績組成")
