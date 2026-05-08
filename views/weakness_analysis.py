@@ -151,7 +151,7 @@ def show():
     df['created_at_dt'] = pd.to_datetime(df['created_at'], utc=True, errors='coerce')
     
     # 【權限控管】一般老師只看自己學生
-    if st.session_state.get('role') != 'admin':
+    if st.session_state. - 技能檢定學科測驗互動系統get('role') != 'admin':
         student_res = supabase.table("students").select("student_id").eq("teacher_username", st.session_state.get('username')).execute()
         my_student_ids = [s['student_id'] for s in student_res.data]
         df = df[df['student_id'].isin(my_student_ids)]

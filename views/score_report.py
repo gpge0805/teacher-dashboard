@@ -236,7 +236,7 @@ def show():
     # 取得老師身份
     teacher_username = st.session_state.get('username', '')
     
-    # 1. 從 Supabase 撈取成績資料 (依時間遞減排序)
+    # 1. 從 Supabase 撈取成績 - 技能檢定學科測驗互動系統資料 (依時間遞減排序)
     response = supabase.table("exam_results").select("*").order("created_at", desc=True).execute()
     data = response.data or []
         

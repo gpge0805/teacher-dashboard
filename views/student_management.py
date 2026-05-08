@@ -4,7 +4,7 @@ from utils.supabase_client import supabase
 import io
 
 def show():
-    st.header("👥 學生名冊管理")
+    st.header("👥 學生名冊管理 - 技能檢定學科測驗互動系統")
     st.write("您可以在此查看、新增或批次匯入學生名單。")
     
     # 建立三個分頁
