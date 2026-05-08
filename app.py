@@ -6,6 +6,14 @@ from utils.supabase_client import supabase
 # 設定頁面標題與佈局
 st.set_page_config(page_title="技能檢定學科測驗互動系統 - 教師管理後台", page_icon="🎓", layout="wide")
 
+
+def render_footer():
+    st.markdown("---")
+    st.markdown(
+        "<p style='text-align: center; color: #666; font-size: 0.9rem;'>© 2026 Design by yucs. All rights reserved.</p>",
+        unsafe_allow_html=True,
+    )
+
 # 檢查密碼的輔助函數
 def check_password(hashed_password: str, user_password: str) -> bool:
     """比對密碼（僅支援 bcrypt hash）"""
@@ -18,10 +26,6 @@ def check_password(hashed_password: str, user_password: str) -> bool:
 def login_page():
     st.markdown("<h1 style='text-align: center;'>🎓 技能檢定學科測驗互動系統 - 教師管理後台</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center;'>請輸入您的教師帳號與密碼登入系統。</p>", unsafe_allow_html=True)
-    st.markdown("<hr />", unsafe_allow_html=True)
-    col_footer = st.columns([3])[0]
-    with col_footer:
-        st.caption("📌 © 2026 技能檢定學科測驗互動系統 | 版本：v0.2 | 部署時間：2026-05-08")
     
     # 使用 columns 讓登入框置中
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -76,6 +80,7 @@ def main():
     if public_view == 'student-weekly':
         from views import student_weekly_query
         student_weekly_query.show()
+        render_footer()
         return
 
     # 初始化 Session State
@@ -85,6 +90,7 @@ def main():
     # 判斷是否已登入
     if not st.session_state['logged_in']:
         login_page()
+        render_footer()
     else:
         # 登入後的側邊欄 (Sidebar)
         st.sidebar.title(f"歡迎, {st.session_state.get('name', '老師')}")
@@ -138,6 +144,8 @@ def main():
         elif choice == "👨‍🏫 教師帳號管理":
             from views import teacher_management
             teacher_management.show()
+
+        render_footer()
 
 if __name__ == "__main__":
     main()
