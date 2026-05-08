@@ -1,11 +1,9 @@
 import io
-import json
 
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from utils.certification import extract_certification, get_certification_filter_map, get_certification_filter_options
 from utils.supabase_client import supabase
 from utils.weekly_stats import (
     build_primary_candidate_label,
@@ -199,29 +197,8 @@ def _build_week_options(num_weeks=12, week_start_weekday=2):
     return options
 
 
-def _parse_categories_ws(value):
-    if isinstance(value, list):
-        return [str(i).strip() for i in value if str(i).strip()]
-    if value is None:
-        return []
-    if isinstance(value, float):
-        return []
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            return []
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, list):
-                return [str(i).strip() for i in parsed if str(i).strip()]
-        except Exception:
-            pass
-        return [p.strip() for p in raw.split(',') if p.strip()]
-    return []
-
-
 def show():
-    st.header("📅 每週成績統計 - 技能檢定學科測驗互動系統")
+    st.header("📅 每週成績統計")
     st.caption("學生公開查詢連結格式：正式後台網址後加上 ?view=student-weekly")
 
     teacher_username = st.session_state.get('username', '')
@@ -304,7 +281,7 @@ def show():
         st.info("目前沒有可統計的班級資料。")
         return
     selected_class = st.selectbox("班級篩選", class_options)
-    selected_cert_ws = st.selectbox("檢定別篩選", get_certification_filter_options(), key="weekly_cert")
+
     # ── 班級級及格標準設定區（根據選定班級變化）──────────────────────────────────────────
     ts_class = load_teacher_settings(supabase, teacher_username, selected_class)
     with st.expander(f"⚙️ 【{selected_class}】及格標準設定", expanded=False):
@@ -338,12 +315,6 @@ def show():
 
     student_ids = [safe_str(sid) for sid in visible_students_df['student_id'].tolist() if safe_str(sid)]
     results_df = _load_week_results(student_ids, week_start_dt, week_end_dt)
-
-    # 檢定別篩選
-    if selected_cert_ws != "全部" and not results_df.empty:
-        cert_map = get_certification_filter_map()
-        results_df = results_df[results_df.apply(lambda r: extract_certification(r) == cert_map[selected_cert_ws], axis=1)].copy()
-
     valid_results_df = prepare_results_dataframe(results_df)
     if valid_results_df.empty:
         st.info("當週沒有成績")

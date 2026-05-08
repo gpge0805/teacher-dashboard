@@ -4,7 +4,7 @@ import os
 from utils.supabase_client import supabase
 
 # 設定頁面標題與佈局
-st.set_page_config(page_title="技能檢定學科測驗互動系統 - 教師管理後台", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="教師管理後台", page_icon="🎓", layout="wide")
 
 # 檢查密碼的輔助函數
 def check_password(hashed_password: str, user_password: str) -> bool:
@@ -16,12 +16,8 @@ def check_password(hashed_password: str, user_password: str) -> bool:
 
 # 登入畫面
 def login_page():
-    st.markdown("<h1 style='text-align: center;'>🎓 技能檢定學科測驗互動系統 - 教師管理後台</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>🎓 工業電子丙級學科測試線上版 - 教師管理後台</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center;'>請輸入您的教師帳號與密碼登入系統。</p>", unsafe_allow_html=True)
-    st.markdown("<hr />", unsafe_allow_html=True)
-    col_footer = st.columns([3])[0]
-    with col_footer:
-        st.caption("📌 © 2026 技能檢定學科測驗互動系統 | 版本：v0.2 | 部署時間：2026-05-08")
     
     # 使用 columns 讓登入框置中
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -110,7 +106,7 @@ def main():
         # 🌟 根據選單選擇，載入對應的頁面內容
         if choice == "📊 儀表板首頁":
             st.title("📊 儀表板首頁")
-            st.write("歡迎來到技能檢定學科測驗互動系統 - 教師管理後台！請從左側選單選擇您要操作的功能。")
+            st.write("歡迎來到教師管理後台！請從左側選單選擇您要操作的功能。")
             
             # 顯示一些快速統計 (選做)
             col1, col2, col3 = st.columns(3)

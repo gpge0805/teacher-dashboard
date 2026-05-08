@@ -1,15 +1,9 @@
 import streamlit as st
 import pandas as pd
 import json
+import os
 from collections import Counter, defaultdict
 from utils.supabase_client import supabase
-from utils.certification import (
-    extract_certification,
-    format_certification_label,
-    get_certification_filter_map,
-    get_certification_filter_options,
-    load_questions_by_certification,
-)
 
 
 def _safe_str(value):
@@ -43,6 +37,31 @@ def _parse_categories(value):
             pass
         return [_safe_str(part) for part in raw.split(',') if _safe_str(part)]
     return [_safe_str(value)] if _safe_str(value) else []
+
+def load_questions():
+    base_dir = os.path.dirname(__file__)
+    possible_paths = [
+        os.path.abspath(os.path.join(base_dir, '..', 'questions.json')),
+        os.path.abspath(os.path.join(base_dir, '..', '..', '工業電子丙級學科互動式題庫v1-0331', 'src', 'data', 'questions.json')),
+        os.path.abspath(os.path.join(base_dir, '..', '..', 'src', 'data', 'questions.json')),
+        os.path.abspath(os.path.join(base_dir, '..', 'src', 'data', 'questions.json')),
+        os.path.abspath(os.path.join(os.getcwd(), '工業電子丙級學科互動式題庫v1-0331', 'src', 'data', 'questions.json')),
+        os.path.abspath(os.path.join(os.getcwd(), '..', 'src', 'data', 'questions.json')),
+        os.path.abspath(os.path.join(os.getcwd(), 'src', 'data', 'questions.json')),
+        os.path.abspath(os.path.join(os.getcwd(), 'questions.json')),
+    ]
+    
+    for file_path in possible_paths:
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                st.error(f"讀取題庫檔案失敗 ({file_path}): {e}")
+                return []
+                
+    st.error(f"找不到題庫檔案！已嘗試以下路徑: {possible_paths}")
+    return []
 
 def parse_wrong_question_id(question_id):
     """將前端錯題 ID 轉為可查題庫的鍵值。
@@ -90,46 +109,6 @@ def _get_display_name(category):
     return CATEGORY_DISPLAY_NAMES.get(category, category)
 
 
-def _build_category_key(cert_id, category, split_by_certification):
-    normalized_category = _normalize_category(category)
-    if split_by_certification and cert_id:
-        return f"{cert_id}::{normalized_category}"
-    return normalized_category
-
-
-def _get_display_name_from_key(category_key):
-    cert_id, _, raw_category = category_key.partition('::')
-    if raw_category:
-        return f"{format_certification_label(cert_id)}｜{_get_display_name(raw_category)}"
-    return _get_display_name(category_key)
-
-
-def _build_question_lookup(questions):
-    category_question_lookup = {}
-    id_lookup = {}
-    duplicate_ids = set()
-    category_total_questions = Counter()
-
-    for question in questions:
-        question_id = str(question.get('id', '')).strip()
-        category = str(question.get('category', '')).strip()
-        if category:
-            category_total_questions[_normalize_category(category)] += 1
-        if category and question_id:
-            category_question_lookup[(_normalize_category(category), question_id)] = question
-        if question_id in id_lookup:
-            duplicate_ids.add(question_id)
-        else:
-            id_lookup[question_id] = question
-
-    return {
-        'category_question_lookup': category_question_lookup,
-        'id_lookup': id_lookup,
-        'duplicate_ids': duplicate_ids,
-        'category_total_questions': category_total_questions,
-    }
-
-
 def _normalize_category(cat_name):
     """將考試記錄中的長名稱（如「工作項目04：儀表操作」）正規化為題庫短名稱（如「工作項目04」）。
     共同科目保持原樣（題庫本身就是長名稱）。"""
@@ -151,7 +130,7 @@ def _severity_color(rate):
 
 
 def show():
-    st.header("📈 錯題弱點分析 - 技能檢定學科測驗互動系統")
+    st.header("📈 錯題弱點分析")
     st.write("分析學生在測驗中最常答錯的題目，幫助您掌握教學重點。")
     
     # ── 1. 撈取測驗成績資料 ──
@@ -170,7 +149,6 @@ def show():
 
     df['category_list'] = df['categories'].apply(_parse_categories)
     df['created_at_dt'] = pd.to_datetime(df['created_at'], utc=True, errors='coerce')
-    df['certification_id'] = df.apply(extract_certification, axis=1)
     
     # 【權限控管】一般老師只看自己學生
     if st.session_state.get('role') != 'admin':
@@ -183,7 +161,7 @@ def show():
             
     # ── 2. 篩選器 ──
     st.markdown("### 🔍 分析範圍篩選")
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
         classes = ["全部"] + sorted(df['class_name'].dropna().unique().tolist())
@@ -211,17 +189,10 @@ def show():
             start_date, end_date = date_range
         else:
             start_date = end_date = date_range
-
-    with col3:
-        selected_cert = st.selectbox("檢定別", get_certification_filter_options(), key="weakness_cert")
         
     # 套用篩選
     if selected_class != "全部":
         df = df[df['class_name'] == selected_class]
-
-    if selected_cert != "全部":
-        cert_map = get_certification_filter_map()
-        df = df[df['certification_id'] == cert_map[selected_cert]]
 
     if start_date > end_date:
         start_date, end_date = end_date, start_date
@@ -234,54 +205,41 @@ def show():
         return
         
     # ── 3. 載入題庫 & 建立查找表 ──
-    questions_by_certification, attempted_paths = load_questions_by_certification()
-    if not questions_by_certification:
-        all_attempted_paths = []
-        for file_paths in attempted_paths.values():
-            all_attempted_paths.extend(file_paths)
-        st.error(f"找不到題庫檔案！已嘗試以下路徑: {all_attempted_paths}")
+    questions = load_questions()
+    if not questions:
         return
 
-    in_scope_certifications = sorted({cert for cert in df['certification_id'].tolist() if cert in questions_by_certification})
-    split_by_certification = len(in_scope_certifications) > 1
-    question_lookup_by_certification = {
-        cert_id: _build_question_lookup(questions)
-        for cert_id, questions in questions_by_certification.items()
-    }
-    default_lookup = question_lookup_by_certification.get('industrial', {
-        'category_question_lookup': {},
-        'id_lookup': {},
-        'duplicate_ids': set(),
-        'category_total_questions': Counter(),
-    })
-
+    category_question_lookup = {}
+    id_lookup = {}
+    duplicate_ids = set()
+    # 統計每個工作項目的總題數
     category_total_questions = Counter()
-    for cert_id in in_scope_certifications or list(question_lookup_by_certification.keys()):
-        lookup = question_lookup_by_certification.get(cert_id)
-        if not lookup:
-            continue
-        for category, total_count in lookup['category_total_questions'].items():
-            category_key = _build_category_key(cert_id, category, split_by_certification)
-            category_total_questions[category_key] += total_count
+    for question in questions:
+        question_id = str(question.get('id', '')).strip()
+        category = str(question.get('category', '')).strip()
+        if category:
+            category_total_questions[category] += 1
+        if category and question_id:
+            category_question_lookup[(category, question_id)] = question
+        if question_id in id_lookup:
+            duplicate_ids.add(question_id)
+        else:
+            id_lookup[question_id] = question
 
     # ── 4. 統計錯題，按工作項目分組 ──
     # 每個工作項目 -> Counter({題目ID: 錯誤次數})
     category_wrong_counts = defaultdict(Counter)
-    question_info_lookup = {}
     # 每個工作項目被多少人作答（以 exam_results 中 categories 包含該項目為準）
     category_respondent_count = Counter()
     
     total_exams = len(df)
 
     for _, row in df.iterrows():
-        row_certification = row.get('certification_id', '')
-        lookup = question_lookup_by_certification.get(row_certification, default_lookup)
-
         # 統計作答人數（哪些工作項目被這次測驗涵蓋）
         cats_in_exam = _parse_categories(row.get('categories'))
         for cat in cats_in_exam:
-            category_key = _build_category_key(row_certification, cat, split_by_certification)
-            category_respondent_count[category_key] += 1
+            normalized = _normalize_category(cat)
+            category_respondent_count[normalized] += 1
 
         wrong_ids = row.get('wrong_question_ids', [])
         if isinstance(wrong_ids, str):
@@ -295,13 +253,12 @@ def show():
             category, local_id, raw_id = parse_wrong_question_id(q_id)
             q_info = None
             if category:
-                q_info = lookup['category_question_lookup'].get((category, local_id))
-            elif local_id not in lookup['duplicate_ids']:
-                q_info = lookup['id_lookup'].get(local_id)
+                q_info = category_question_lookup.get((category, local_id))
+            elif local_id not in duplicate_ids:
+                q_info = id_lookup.get(local_id)
             if q_info:
-                category_key = _build_category_key(row_certification, q_info.get('category', '未知'), split_by_certification)
-                category_wrong_counts[category_key][raw_id] += 1
-                question_info_lookup[(category_key, raw_id)] = q_info
+                cat = q_info.get('category', '未知')
+                category_wrong_counts[cat][raw_id] += 1
             
     all_wrong_count = sum(c.total() for c in category_wrong_counts.values())
     if all_wrong_count == 0:
@@ -328,7 +285,7 @@ def show():
         
         overview_rows.append({
             'category_key': cat,
-            '工作項目': _get_display_name_from_key(cat),
+            '工作項目': _get_display_name(cat),
             '總題數': total_q,
             '作答人次': respondents,
             '錯題數（不同題）': wrong_q_count,
@@ -394,8 +351,12 @@ def show():
             # 組逐題資料
             detail_rows = []
             for raw_id, wrong_times in wrong_counter.most_common():
-                _, local_id, _ = parse_wrong_question_id(raw_id)
-                q_info = question_info_lookup.get((cat_key, raw_id))
+                category, local_id, _ = parse_wrong_question_id(raw_id)
+                q_info = None
+                if category:
+                    q_info = category_question_lookup.get((category, local_id))
+                elif local_id not in duplicate_ids:
+                    q_info = id_lookup.get(local_id)
                 
                 if not q_info:
                     continue
@@ -467,13 +428,17 @@ def show():
     for cat_key, wrong_counter in category_wrong_counts.items():
         respondents = category_respondent_count.get(cat_key, 0)
         for raw_id, wrong_times in wrong_counter.most_common():
-            _, local_id, _ = parse_wrong_question_id(raw_id)
-            q_info = question_info_lookup.get((cat_key, raw_id))
+            category, local_id, _ = parse_wrong_question_id(raw_id)
+            q_info = None
+            if category:
+                q_info = category_question_lookup.get((category, local_id))
+            elif local_id not in duplicate_ids:
+                q_info = id_lookup.get(local_id)
             if not q_info:
                 continue
             per_q_rate = round(wrong_times / respondents * 100, 1) if respondents > 0 else 0
             all_detail_rows.append({
-                '工作項目': _get_display_name_from_key(cat_key),
+                '工作項目': _get_display_name(cat_key),
                 '題號': local_id,
                 '題目': q_info.get('question', ''),
                 '正確答案': get_correct_answer_text(q_info),

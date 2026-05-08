@@ -71,7 +71,7 @@ def _build_week_options(num_weeks=12, week_start_weekday=2):
 
 
 def show():
-    st.title("📘 技能檢定學科測驗互動系統 - 成績查詢")
+    st.title("📘 成績查詢")
     st.write("輸入學號後，可查看指定週次的統計成績。")
 
     # 首先取得 query params 中的老師參數（如果有的話作為備用）

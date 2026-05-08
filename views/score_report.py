@@ -3,12 +3,6 @@ import streamlit.components.v1 as components
 import pandas as pd
 import json
 from utils.supabase_client import supabase
-from utils.certification import (
-    extract_certification,
-    format_certification_label,
-    get_certification_filter_map,
-    get_certification_filter_options,
-)
 from utils.weekly_stats import save_teacher_settings, load_teacher_settings
 
 
@@ -236,7 +230,7 @@ def _find_duplicate_exam_rows(result_df, window_seconds=60):
     return grouped_df
 
 def show():
-    st.header("📝 成績報表查詢 - 技能檢定學科測驗互動系統")
+    st.header("📝 成績報表查詢")
     st.write("您可以在此查看學生的測驗成績，並進行篩選與匯出。")
     
     # 取得老師身份
@@ -275,8 +269,6 @@ def show():
     df['category_list'] = df['categories'].apply(_parse_categories)
     df['work_items_display'] = df['category_list'].apply(_format_categories)
     df['created_at_dt'] = pd.to_datetime(df['created_at'], utc=True, errors='coerce')
-    df['certification_id'] = df.apply(extract_certification, axis=1)
-    df['certification_display'] = df['certification_id'].apply(format_certification_label)
 
     # 【權限控管】如果是一般老師，只能看到自己學生的成績
     if st.session_state.get('role') != 'admin':
@@ -474,7 +466,7 @@ def show():
     
     # 3. 建立篩選器 (Filters)
     st.markdown("### 🔍 資料篩選")
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         # 班級清單優先以學生名冊為主，避免「沒人測驗的班級」無法選取
@@ -490,9 +482,6 @@ def show():
 
     with col3:
         search_text = st.text_input("搜尋姓名或學號 (輸入關鍵字)")
-
-    with col4:
-        selected_cert = st.selectbox("檢定別", get_certification_filter_options())
 
     option_col1, option_col2 = st.columns(2)
     with option_col1:
@@ -582,10 +571,6 @@ def show():
             filtered_df['category_list'].apply(lambda items: bool(set(items) & selected_work_items_set))
         ]
 
-    if selected_cert != "全部":
-        cert_map = get_certification_filter_map()
-        filtered_df = filtered_df[filtered_df['certification_id'] == cert_map[selected_cert]]
-
     if start_date > end_date:
         st.warning("開始日期晚於結束日期，系統已自動交換區間。")
         start_date, end_date = end_date, start_date
@@ -647,7 +632,6 @@ def show():
     display_cols = {
         'created_at_display': '測驗時間',
         'class_name': '班級',
-        'certification_display': '檢定別',
         'work_items_display': '工作項目',
         'seat_number': '座號',
         'student_id': '學號',

@@ -8,7 +8,7 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 def show():
-    st.header("👨‍🏫 教師帳號管理 - 技能檢定學科測驗互動系統")
+    st.header("👨‍🏫 教師帳號管理")
     st.write("管理者可以在此建立新教師帳號，並設定權限與啟用狀態。")
     
     # 雙重檢查：確保只有 admin 可以訪問
