@@ -1,16 +1,31 @@
 import streamlit as st
 import bcrypt
 import os
+from datetime import datetime, timedelta, timezone
 from utils.supabase_client import supabase
 
 # 設定頁面標題與佈局
 st.set_page_config(page_title="技能檢定學科測驗互動系統 - 教師管理後台", page_icon="🎓", layout="wide")
 
 
+def get_deploy_time_text() -> str:
+    # Allow manual override in deployment platform secrets if needed.
+    deploy_time = os.getenv("APP_DEPLOY_TIME")
+    if deploy_time:
+        return deploy_time
+
+    try:
+        utc8 = timezone(timedelta(hours=8))
+        modified = datetime.fromtimestamp(os.path.getmtime(__file__), tz=timezone.utc).astimezone(utc8)
+        return modified.strftime("%Y-%m-%d %H:%M")
+    except OSError:
+        return "未知"
+
+
 def render_footer():
     st.markdown("---")
     st.markdown(
-        "<p style='text-align: center; color: #666; font-size: 0.9rem;'>© 2026 Design by yucs. All rights reserved. | 部署時間：2026-05-08 23:48（UTC+8）</p>",
+        f"<p style='text-align: center; color: #666; font-size: 0.9rem;'>© 2026 Design by yucs. All rights reserved. | 部署時間：{get_deploy_time_text()}（UTC+8）</p>",
         unsafe_allow_html=True,
     )
 
