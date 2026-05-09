@@ -1,10 +1,16 @@
 """檢查並設定 Supabase RLS"""
 import requests
 import json
+import os
 
-SUPABASE_URL = "https://lmwngzkioqhqatkhlqmy.supabase.co"
-SERVICE_KEY = "REDACTED_SUPABASE_SERVICE_ROLE_JWT"
-ANON_KEY = "REDACTED_SUPABASE_ANON_JWT"
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SERVICE_KEY = os.getenv("SUPABASE_KEY")
+ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+
+if not SUPABASE_URL or not SERVICE_KEY or not ANON_KEY:
+  raise RuntimeError(
+    "Missing required env vars: SUPABASE_URL, SUPABASE_KEY, SUPABASE_ANON_KEY"
+  )
 
 service_headers = {
     "apikey": SERVICE_KEY,

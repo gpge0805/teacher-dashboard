@@ -1,9 +1,15 @@
 """RLS 驗證腳本"""
 import requests
+import os
 
-URL = "https://lmwngzkioqhqatkhlqmy.supabase.co"
-ANON = "REDACTED_SUPABASE_ANON_JWT"
-SVC = "REDACTED_SUPABASE_SERVICE_ROLE_JWT"
+URL = os.getenv("SUPABASE_URL")
+ANON = os.getenv("SUPABASE_ANON_KEY")
+SVC = os.getenv("SUPABASE_KEY")
+
+if not URL or not ANON or not SVC:
+    raise RuntimeError(
+        "Missing required env vars: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_KEY"
+    )
 
 anon_h = {"apikey": ANON, "Authorization": f"Bearer {ANON}", "Content-Type": "application/json", "Prefer": "return=minimal"}
 svc_h = {"apikey": SVC, "Authorization": f"Bearer {SVC}", "Content-Type": "application/json"}
