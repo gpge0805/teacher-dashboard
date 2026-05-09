@@ -3,11 +3,11 @@ import os
 
 
 CERTIFICATION_LABELS = {
-    'industrial': '工丙',
-    'digital-b': '數乙',
-    'industrial-wiring-c': '工配丙',
-    'computer-hardware-b': '硬裝乙',
-    'computer-hardware-c': '硬裝丙',
+    'industrial': '工業電子丙級',
+    'digital-b': '數位電子乙級',
+    'industrial-wiring-c': '工業配線丙級',
+    'computer-hardware-b': '電腦硬體裝修乙級',
+    'computer-hardware-c': '電腦硬體裝修丙級',
 }
 
 UNMARKED_CERTIFICATION_LABEL = '未標記'

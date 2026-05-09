@@ -493,7 +493,7 @@ def show():
 
     with col4:
         cert_options = get_certification_filter_options()
-        selected_cert_label = st.selectbox("選擇職種", cert_options)
+        selected_cert_label = st.selectbox("檢定職種", cert_options)
         cert_filter_map = get_certification_filter_map()
 
     option_col1, option_col2 = st.columns(2)
