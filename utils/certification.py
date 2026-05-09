@@ -8,6 +8,7 @@ CERTIFICATION_LABELS = {
     'industrial-wiring-c': '工業配線丙級',
     'computer-hardware-b': '電腦硬體裝修乙級',
     'computer-hardware-c': '電腦硬體裝修丙級',
+    'computer-maintenance': '電腦修護',
 }
 
 UNMARKED_CERTIFICATION_LABEL = '未標記'
@@ -24,6 +25,7 @@ QUESTION_BANK_FILES = {
         '../src/data/questions-computer-hardware-c.json',
         '../src/data/questions-shared-info.json',
     ],
+    'computer-maintenance': ['../src/data/questions-computer-maintenance.json'],
 }
 
 
