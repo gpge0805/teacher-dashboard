@@ -221,7 +221,7 @@ def show():
         with cfg_col2:
             cfg_slot_start = st.number_input(
                 "關鍵時段（開始小時）", min_value=0, max_value=23,
-                value=ts - 技能檢定學科測驗互動系統_global['primary_slot_start_hour'], step=1,
+                value=ts_global['primary_slot_start_hour'], step=1,
                 help="例如 15 → 15:00",
             )
         with cfg_col3:

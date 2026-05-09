@@ -3,6 +3,12 @@ import streamlit.components.v1 as components
 import pandas as pd
 import json
 from utils.supabase_client import supabase
+from utils.certification import (
+    extract_certification,
+    format_certification_label,
+    get_certification_filter_map,
+    get_certification_filter_options,
+)
 from utils.weekly_stats import save_teacher_settings, load_teacher_settings
 
 
@@ -268,6 +274,8 @@ def show():
 
     df['category_list'] = df['categories'].apply(_parse_categories)
     df['work_items_display'] = df['category_list'].apply(_format_categories)
+    df['certification_id_resolved'] = df.apply(extract_certification, axis=1)
+    df['certification_display'] = df['certification_id_resolved'].apply(format_certification_label)
     df['created_at_dt'] = pd.to_datetime(df['created_at'], utc=True, errors='coerce')
 
     # 【權限控管】如果是一般老師，只能看到自己學生的成績
@@ -466,7 +474,7 @@ def show():
     
     # 3. 建立篩選器 (Filters)
     st.markdown("### 🔍 資料篩選")
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         # 班級清單優先以學生名冊為主，避免「沒人測驗的班級」無法選取
@@ -482,6 +490,11 @@ def show():
 
     with col3:
         search_text = st.text_input("搜尋姓名或學號 (輸入關鍵字)")
+
+    with col4:
+        cert_options = get_certification_filter_options()
+        selected_cert_label = st.selectbox("選擇職種", cert_options)
+        cert_filter_map = get_certification_filter_map()
 
     option_col1, option_col2 = st.columns(2)
     with option_col1:
@@ -571,6 +584,11 @@ def show():
             filtered_df['category_list'].apply(lambda items: bool(set(items) & selected_work_items_set))
         ]
 
+    if selected_cert_label != "全部":
+        filtered_df = filtered_df[
+            filtered_df['certification_id_resolved'] == cert_filter_map.get(selected_cert_label, '')
+        ]
+
     if start_date > end_date:
         st.warning("開始日期晚於結束日期，系統已自動交換區間。")
         start_date, end_date = end_date, start_date
@@ -605,6 +623,7 @@ def show():
             if not missing_students_df.empty:
                 missing_students_df['created_at_display'] = ""
                 missing_students_df['work_items_display'] = "、".join(selected_work_items) if selected_work_items else "未測驗"
+                missing_students_df['certification_display'] = "未測驗"
                 missing_students_df['student_name'] = missing_students_df['name']
                 missing_students_df['score'] = None
                 missing_students_df['correct_count'] = None
@@ -613,7 +632,7 @@ def show():
                 filtered_df = pd.concat([
                     filtered_df,
                     missing_students_df[[
-                        'created_at_display', 'class_name', 'work_items_display', 'seat_number',
+                        'created_at_display', 'class_name', 'certification_display', 'work_items_display', 'seat_number',
                         'student_id', 'student_name', 'score', 'correct_count', 'time_spent', 'created_at_dt'
                     ]]
                 ], ignore_index=True, sort=False)
@@ -632,6 +651,7 @@ def show():
     display_cols = {
         'created_at_display': '測驗時間',
         'class_name': '班級',
+        'certification_display': '職種',
         'work_items_display': '工作項目',
         'seat_number': '座號',
         'student_id': '學號',
