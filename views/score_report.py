@@ -541,13 +541,11 @@ def show():
         )
 
     valid_dates = df['created_at_dt'].dropna()
+    today = pd.Timestamp.now(tz='Asia/Taipei').date()
     if valid_dates.empty:
-        today = pd.Timestamp.now(tz='Asia/Taipei').date()
         min_date = today
-        max_date = today
     else:
         min_date = valid_dates.dt.tz_convert('Asia/Taipei').dt.date.min()
-        max_date = valid_dates.dt.tz_convert('Asia/Taipei').dt.date.max()
 
     date_col1, date_col2 = st.columns(2)
     with date_col1:
@@ -555,16 +553,16 @@ def show():
             "開始日期",
             value=min_date,
             min_value=min_date,
-            max_value=max_date,
+            max_value=today,
             format="YYYY-MM-DD",
             key="score_report_start_date"
         )
     with date_col2:
         end_date = st.date_input(
             "結束日期",
-            value=max_date,
+            value=today,
             min_value=min_date,
-            max_value=max_date,
+            max_value=today,
             format="YYYY-MM-DD",
             key="score_report_end_date"
         )
