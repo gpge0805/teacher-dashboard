@@ -1,0 +1,69 @@
+
+name: Streamlit Keep Warm
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Install browser
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Visit Streamlit
+        env:
+          APP_URL: https://teacher-dashboard-qklw6q7r6az3gc8k7paciw.streamlit.app/
+        run: |
+          python - <<'PY'
+          import os, re, time
+          from playwright.sync_api import sync_playwright
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
+              page = browser.new_page()
+              page.goto(
+                  os.environ["APP_URL"],
+                  wait_until="domcontentloaded",
+                  timeout=120000
+              )
+
+              deadline = time.monotonic() + 120
+              success = False
+
+              while time.monotonic() < deadline:
+                  wake = page.get_by_role(
+                      "button",
+                      name=re.compile("get this app back up", re.I)
+                  )
+
+                  if wake.count():
+                      wake.first.click()
+
+                  if page.locator(
+                      '[data-testid="stApp"]'
+                  ).is_visible():
+                      success = True
+                      break
+
+                  page.wait_for_timeout(2000)
+
+              print("Final URL:", page.url)
+              browser.close()
+
+              if not success:
+                  raise RuntimeError(
+                      "App UI not reached; check login or sleep state"
+                  )
+
+              print("Streamlit UI reached")
+          PY
