@@ -1,3 +1,35 @@
+name: Streamlit Keep Warm
+
+on:
+  schedule:
+    # GitHub Actions cron uses UTC. This runs at 02:23, 08:23,
+    # 14:23 and 20:23 in Taiwan (UTC+8).
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wake:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+
+    steps:
+      - name: Install browser
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Visit and diagnose Streamlit
+        env:
+          APP_URL: https://teacher-dashboard-qklw6q7r6az3gc8k7paciw.streamlit.app/
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import time
+          from urllib.parse import urlsplit
           from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
           def safe_url(raw):
