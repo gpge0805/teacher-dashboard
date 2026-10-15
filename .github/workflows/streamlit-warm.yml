@@ -1,9 +1,7 @@
 name: Streamlit Keep Warm
 
-on:
+"on":
   schedule:
-    # GitHub Actions cron uses UTC. This runs at 02:23, 08:23,
-    # 14:23 and 20:23 in Taiwan (UTC+8).
     - cron: '23 */6 * * *'
   workflow_dispatch:
 
@@ -13,7 +11,7 @@ permissions:
 jobs:
   wake:
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    timeout-minutes: 5
 
     steps:
       - name: Install browser
@@ -22,79 +20,61 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Visit and diagnose Streamlit
+        shell: python
         env:
           APP_URL: https://teacher-dashboard-qklw6q7r6az3gc8k7paciw.streamlit.app/
         run: |
-          python - <<'PY'
           import os
           import re
           import time
           from urllib.parse import urlsplit
-          from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-
-          def safe_url(raw):
-              url = urlsplit(raw)
-              return f'{url.scheme}://{url.netloc}{url.path}'
+          from playwright.sync_api import sync_playwright
 
           with sync_playwright() as p:
               browser = p.chromium.launch(headless=True)
               page = browser.new_page()
-              try:
-                  response = page.goto(
-                      os.environ['APP_URL'],
-                      wait_until='domcontentloaded',
-                      timeout=60000,
-                  )
-                  print('Initial HTTP status:', response.status if response else 'n/a', flush=True)
-                  deadline = time.monotonic() + 120
+              response = page.goto(
+                  os.environ["APP_URL"],
+                  wait_until="domcontentloaded",
+                  timeout=60000,
+              )
+              print("Initial HTTP status:", response.status if response else "n/a", flush=True)
+              reached = False
+              deadline = time.monotonic() + 120
 
-                  while time.monotonic() < deadline:
-                      for frame in page.frames:
-                          if frame.locator('[data-testid="stApp"]').is_visible():
-                              print('Streamlit UI reached', flush=True)
-                              raise SystemExit(0)
+              while time.monotonic() < deadline:
+                  for frame in page.frames:
+                      app = frame.locator('[data-testid="stApp"]')
+                      if app.count() and app.first.is_visible():
+                          reached = True
+                          break
+                      wake = frame.get_by_role(
+                          "button", name=re.compile("get this app back up", re.I)
+                      )
+                      if wake.count() and wake.first.is_visible():
+                          wake.first.click(timeout=3000)
+                          print("Wake button clicked", flush=True)
+                  if reached:
+                      break
+                  page.wait_for_timeout(2000)
 
-                      for frame in page.frames:
-                          wake = frame.get_by_role(
-                              'button', name=re.compile('get this app back up', re.I)
-                          )
-                          if wake.count():
-                              try:
-                                  wake.first.click(timeout=3000)
-                                  print('Wake button clicked', flush=True)
-                              except PlaywrightTimeout:
-                                  pass
-
-                      page.wait_for_timeout(2000)
-
-                  print('Diagnostic: Streamlit UI was not visible after 120 seconds')
-                  print('Final location:', safe_url(page.url))
-                  print('Page title:', page.title())
-                  print('Frame count:', len(page.frames))
+              u = urlsplit(page.url)
+              print("Final location:", u.scheme + "://" + u.netloc + u.path, flush=True)
+              print("Page title:", page.title(), flush=True)
+              print("Frame count:", len(page.frames), flush=True)
+              if not reached:
                   for i, frame in enumerate(page.frames):
                       try:
-                          body = frame.locator('body').inner_text(timeout=3000).lower()
+                          body = frame.locator("body").inner_text(timeout=3000).lower()
                       except Exception:
-                          body = ''
-                      flags = {
-                          'sleep': any(x in body for x in (
-                              'gone to sleep', 'get this app back up', '睡眠', '喚醒'
-                          )),
-                          'login': any(x in body for x in (
-                              'log in', 'login', 'sign in', '登入'
-                          )),
-                          'error': any(x in body for x in (
-                              'something went wrong', 'error running', 'access denied'
-                          )),
-                          'streamlit_element': frame.locator(
-                              '[data-testid="stApp"]'
-                          ).count() > 0,
+                          body = ""
+                      indicators = {
+                          "sleep": "gone to sleep" in body or "get this app back up" in body,
+                          "login": any(s in body for s in ("sign in", "log in", "login", "登入")),
+                          "error": any(s in body for s in ("access denied", "something went wrong")),
                       }
-                      print(f'Frame {i}: {safe_url(frame.url)}; indicators={flags}')
-
-                  raise RuntimeError(
-                      'Streamlit UI not found. Inspect the diagnostic flags above.'
-                  )
-              finally:
-                  browser.close()
-          PY
+                      print("Frame", i, "indicators:", indicators, flush=True)
+              browser.close()
+              if not reached:
+                  raise RuntimeError("Streamlit UI not detected; see diagnostics above")
+              print("Streamlit UI reached", flush=True)
